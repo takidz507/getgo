@@ -12,6 +12,9 @@ public final class Prefs {
     private static final String FILE = "getgo_prefs";
     private static final String KEY_DARK = "dark_mode";
     private static final String KEY_GLASS = "liquid_glass";
+    private static final String KEY_UPDATE_AVAILABLE = "update_available";
+    private static final String KEY_UPDATE_TAG = "update_tag";
+    private static final String KEY_UPDATE_URL = "update_url";
 
     private Prefs() {
     }
@@ -40,6 +43,38 @@ public final class Prefs {
 
     public static void setGlass(Context ctx, boolean glass) {
         prefs(ctx).edit().putBoolean(KEY_GLASS, glass).apply();
+    }
+
+    /**
+     * App-update state, from the GitHub releases check (see
+     * AppUpdate). Stored locally only, so the ⋮ badge survives a
+     * restart until the next check clears or confirms it. This is
+     * NOT an install: tapping Update only opens the release page
+     * and the user installs the new APK by hand.
+     */
+    public static boolean isUpdateAvailable(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_UPDATE_AVAILABLE, false);
+    }
+
+    public static String getUpdateTag(Context ctx) {
+        return prefs(ctx).getString(KEY_UPDATE_TAG, "");
+    }
+
+    public static String getUpdateUrl(Context ctx) {
+        return prefs(ctx).getString(KEY_UPDATE_URL, "");
+    }
+
+    public static void setUpdateAvailable(Context ctx, boolean available,
+                                          String tag, String url) {
+        prefs(ctx).edit()
+                .putBoolean(KEY_UPDATE_AVAILABLE, available)
+                .putString(KEY_UPDATE_TAG, tag == null ? "" : tag)
+                .putString(KEY_UPDATE_URL, url == null ? "" : url)
+                .apply();
+    }
+
+    public static void clearUpdateAvailable(Context ctx) {
+        setUpdateAvailable(ctx, false, "", "");
     }
 
     /**

@@ -68,6 +68,32 @@ public final class DownloadIndex {
         return out;
     }
 
+    /** Remove one entry from the index (used by Library delete). */
+    public static synchronized void remove(Context ctx, Entry target) {
+        List<Entry> all = read(ctx);
+        List<Entry> kept = new ArrayList<Entry>();
+        for (int i = 0; i < all.size(); i++) {
+            Entry e = all.get(i);
+            if (e.uri.equals(target.uri) && e.name.equals(target.name)) {
+                continue;
+            }
+            kept.add(e);
+        }
+        // The file stores oldest-first; read() reverses, so reverse back.
+        Collections.reverse(kept);
+        try {
+            FileOutputStream fos = new FileOutputStream(indexFile(ctx), false);
+            OutputStreamWriter w = new OutputStreamWriter(fos, "UTF-8");
+            for (int i = 0; i < kept.size(); i++) {
+                Entry e = kept.get(i);
+                w.write(e.name + "|" + e.sizeBytes + "|" + e.uri + "|"
+                        + e.timeMillis + "\n");
+            }
+            w.close();
+        } catch (Exception ignored) {
+        }
+    }
+
     public static synchronized void append(Context ctx, Entry e) {
         try {
             FileOutputStream fos = new FileOutputStream(indexFile(ctx), true);

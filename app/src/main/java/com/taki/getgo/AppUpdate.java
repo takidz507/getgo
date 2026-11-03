@@ -1,0 +1,156 @@
+package com.taki.getgo;
+
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
+/**
+ * App-update check for v2.2: GetGo is sideloaded from GitHub, not
+ * from a store, so there is no silent auto-update. This only
+ * compares the latest GitHub release tag with this build's
+ * versionName and, when a newer one exists, hands back the
+ * release page URL. The user taps Update, the browser opens
+ * the release page, and they download + install by hand.
+ *
+ * No new permission: INTERNET is already granted. A failed
+ * check (offline, GitHub down, changed response) is silent in
+ * the background path and only reported when the user asked
+ * for a check from the ⋮ menu.
+ */
+public final class AppUpdate {
+    public static final String RELEASES_API =
+            "https://api.github.com/repos/takidz507/getgo/releases/latest";
+    public static final String RELEASES_PAGE =
+            "https://github.com/takidz507/getgo/releases";
+
+    public interface Callback {
+        void onResult(boolean available, String tag, String url);
+        void onFailure();
+    }
+
+    private AppUpdate() {
+    }
+
+    public static void check(final Context ctx, final Callback cb) {
+        final String current = BuildConfig.VERSION_NAME;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    HttpURLConnection conn = (HttpURLConnection)
+                            new URL(RELEASES_API).openConnection();
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    conn.setRequestProperty("Accept",
+                            "application/vnd.github+json");
+                    conn.setRequestProperty("User-Agent", "GetGo");
+                    if (conn.getResponseCode() != 200) {
+                        postFailure(cb);
+                        return;
+                    }
+                    BufferedReader r = new BufferedReader(
+                            new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    StringBuilder body = new StringBuilder();
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        body.append(line);
+                    }
+                    r.close();
+                    String tag = extractTag(body.toString());
+                    if (tag == null || tag.length() == 0) {
+                        postFailure(cb);
+                        return;
+                    }
+                    final boolean available = isNewer(tag, current);
+                    final String page = RELEASES_PAGE + "/tag/" + tag;
+                    if (available) {
+                        Prefs.setUpdateAvailable(ctx, true, tag, page);
+                    } else {
+                        Prefs.clearUpdateAvailable(ctx);
+                    }
+                    postResult(cb, available, tag, page);
+                } catch (Exception e) {
+                    postFailure(cb);
+                }
+            }
+        }).start();
+    }
+
+    /** Find "tag_name": "v2.3.0" in the releases JSON, without a JSON lib. */
+    static String extractTag(String json) {
+        int i = json.indexOf("\"tag_name\"");
+        if (i < 0) {
+            return null;
+        }
+        int colon = json.indexOf(':', i);
+        int open = json.indexOf('"', colon);
+        int close = json.indexOf('"', open + 1);
+        if (colon < 0 || open < 0 || close < 0) {
+            return null;
+        }
+        return json.substring(open + 1, close);
+    }
+
+    /** "v2.3.0" > "2.2.0": leading 'v' ignored, segments compared numerically. */
+    static boolean isNewer(String latestTag, String currentVersion) {
+        String latest = latestTag.startsWith("v")
+                ? latestTag.substring(1) : latestTag;
+        String[] a = latest.split("\\.");
+        String[] b = currentVersion.split("\\.");
+        int n = Math.max(a.length, b.length);
+        for (int i = 0; i < n; i++) {
+            int x = i < a.length ? parseInt(a[i]) : 0;
+            int y = i < b.length ? parseInt(b[i]) : 0;
+            if (x > y) {
+                return true;
+            }
+            if (x < y) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static int parseInt(String s) {
+        try {
+            // Tags sometimes carry a suffix (e.g. "0-beta"); keep the digits.
+            StringBuilder digits = new StringBuilder();
+            for (int i = 0; i < s.length(); i++) {
+                char c = s.charAt(i);
+                if (c >= '0' && c <= '9') {
+                    digits.append(c);
+                } else {
+                    break;
+                }
+            }
+            return digits.length() == 0 ? 0 : Integer.parseInt(digits.toString());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static void postResult(final Callback cb,
+                                   final boolean available,
+                                   final String tag, final String url) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                cb.onResult(available, tag, url);
+            }
+        });
+    }
+
+    private static void postFailure(final Callback cb) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                cb.onFailure();
+            }
+        });
+    }
+}

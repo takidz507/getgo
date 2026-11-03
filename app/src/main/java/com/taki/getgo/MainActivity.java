@@ -11,11 +11,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
@@ -65,6 +67,12 @@ import kotlin.jvm.functions.Function3;
  * no login for an account you do not own. Sites that need those
  * stay out of scope and will simply fail in the extractor.
  *
+ * v2.2 adds a dedicated Library screen (Play/Share/Delete per
+ * item), a ⋮ menu with a GitHub-releases app-update check that
+ * only lights a badge and opens the release page (no silent
+ * install), layered liquid-glass cards, and one pill shape for
+ * all secondary buttons.
+ *
  * v2.1 adds a runtime yt-dlp update, because the library's
  * bundled yt-dlp (2025.11.12, library 0.18.1 — still the latest
  * library release on Maven Central) is older than YouTube's
@@ -105,13 +113,11 @@ public class MainActivity extends Activity {
     private TextView progressText;
     private TextView statusText;
     private LinearLayout recentContainer;
-    private LinearLayout libraryContainer;
     private TextView recentEmpty;
-    private TextView libraryEmpty;
+    private TextView updateDot;
     private ScrollView scrollView;
     private View pasteCard;
     private View recentCard;
-    private View libraryCard;
 
     private boolean appliedDark;
     private boolean appliedGlass;
@@ -140,17 +146,19 @@ public class MainActivity extends Activity {
         progressText = (TextView) findViewById(R.id.progress_text);
         statusText = (TextView) findViewById(R.id.status_text);
         recentContainer = (LinearLayout) findViewById(R.id.recent_container);
-        libraryContainer = (LinearLayout) findViewById(R.id.library_container);
         recentEmpty = (TextView) findViewById(R.id.recent_empty);
-        libraryEmpty = (TextView) findViewById(R.id.library_empty);
+        updateDot = (TextView) findViewById(R.id.update_dot);
         scrollView = (ScrollView) findViewById(R.id.scroll_view);
         pasteCard = findViewById(R.id.paste_card);
         recentCard = findViewById(R.id.recent_card);
-        libraryCard = findViewById(R.id.library_card);
 
         applyCards();
         refreshQualityChoices();
         refreshLists();
+        refreshUpdateDot();
+        // Silent background check on launch: a new release only
+        // lights the dot, it never downloads or installs anything.
+        checkForUpdate(false);
 
         Button pasteButton = (Button) findViewById(R.id.paste_button);
         pasteButton.setOnClickListener(new View.OnClickListener() {
@@ -208,8 +216,8 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 animatePress(v);
-                refreshLists();
-                scrollView.scrollTo(0, 0);
+                startActivity(new Intent(MainActivity.this, LibraryActivity.class));
+                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
             }
         });
 
@@ -221,6 +229,97 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(MainActivity.this, SettingsActivity.class));
                 // Soft screen transition, not a hard cut.
                 overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+            }
+        });
+
+        Button menuButton = (Button) findViewById(R.id.menu_button);
+        menuButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                animatePress(v);
+                showTopMenu(v);
+            }
+        });
+    }
+
+    /** ⋮ menu: Library, Settings, and the app-update check. */
+    private void showTopMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(getString(R.string.menu_library));
+        menu.getMenu().add(getString(R.string.menu_settings));
+        if (Prefs.isUpdateAvailable(this)) {
+            menu.getMenu().add(getString(R.string.menu_update_available)
+                    + " (" + Prefs.getUpdateTag(this) + ")");
+        }
+        menu.getMenu().add(getString(R.string.menu_check_update));
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override
+            public boolean onMenuItemClick(MenuItem item) {
+                String title = item.getTitle().toString();
+                if (title.equals(getString(R.string.menu_library))) {
+                    startActivity(new Intent(MainActivity.this,
+                            LibraryActivity.class));
+                } else if (title.equals(getString(R.string.menu_settings))) {
+                    startActivity(new Intent(MainActivity.this,
+                            SettingsActivity.class));
+                } else if (title.startsWith(
+                        getString(R.string.menu_update_available))) {
+                    openUpdatePage();
+                } else if (title.equals(getString(R.string.menu_check_update))) {
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.update_checking),
+                            Toast.LENGTH_SHORT).show();
+                    checkForUpdate(true);
+                }
+                return true;
+            }
+        });
+        menu.show();
+    }
+
+    private void openUpdatePage() {
+        String url = Prefs.getUpdateUrl(this);
+        if (url == null || url.length() == 0) {
+            url = AppUpdate.RELEASES_PAGE;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void refreshUpdateDot() {
+        updateDot.setVisibility(Prefs.isUpdateAvailable(this)
+                ? View.VISIBLE : View.GONE);
+    }
+
+    /** notify = true only when the user tapped Check for updates. */
+    private void checkForUpdate(final boolean notify) {
+        AppUpdate.check(this, new AppUpdate.Callback() {
+            @Override
+            public void onResult(boolean available, String tag, String url) {
+                refreshUpdateDot();
+                if (!notify) {
+                    return;
+                }
+                if (available) {
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.update_available) + " " + tag,
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.update_none),
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onFailure() {
+                if (notify) {
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.update_check_failed),
+                            Toast.LENGTH_LONG).show();
+                }
             }
         });
     }
@@ -239,12 +338,12 @@ public class MainActivity extends Activity {
             applyCards();
         }
         refreshLists();
+        refreshUpdateDot();
     }
 
     private void applyCards() {
         Prefs.applyCard(pasteCard, this);
         Prefs.applyCard(recentCard, this);
-        Prefs.applyCard(libraryCard, this);
     }
 
     /** Light press feedback, via AnimHelper (no-op if animations are off). */
@@ -295,13 +394,13 @@ public class MainActivity extends Activity {
     }
 
     private void refreshLists() {
+        // v2.2: the main screen keeps only Recent (3 chips). The full
+        // list lives in LibraryActivity, so this no longer renders it.
         List<DownloadIndex.Entry> entries = DownloadIndex.read(this);
         recentContainer.removeAllViews();
-        libraryContainer.removeAllViews();
 
         boolean empty = entries.isEmpty();
         recentEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
-        libraryEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
 
         int recentCount = Math.min(3, entries.size());
         for (int i = 0; i < recentCount; i++) {
@@ -321,22 +420,7 @@ public class MainActivity extends Activity {
             });
             recentContainer.addView(chip);
         }
-        for (int i = 0; i < entries.size(); i++) {
-            final DownloadIndex.Entry e = entries.get(i);
-            TextView row = new TextView(this);
-            row.setText(e.name + "  ·  " + DownloadIndex.formatSize(e.sizeBytes));
-            row.setTextSize(14);
-            row.setPadding(0, 12, 0, 12);
-            row.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    openEntry(e);
-                }
-            });
-            libraryContainer.addView(row);
-        }
         fadeIn(recentContainer);
-        fadeIn(libraryContainer);
     }
 
     private String shortName(String name) {

@@ -23,12 +23,29 @@
                 android:src="@drawable/ic_launcher"
                 android:contentDescription="@string/app_name" />
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
                 android:text="@string/app_name"
                 android:textSize="24sp"
                 android:textColor="?android:attr/textColorPrimary" />
+            <TextView
+                android:id="@+id/update_dot"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="●"
+                android:textSize="10sp"
+                android:textColor="#FF8C00"
+                android:visibility="gone" />
+            <Button
+                android:id="@+id/menu_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:text="⋮"
+                android:textSize="22sp"
+                android:textAllCaps="false"
+                android:background="@android:color/transparent" />
         </LinearLayout>
 
         <LinearLayout
@@ -50,6 +67,8 @@
                 android:id="@+id/paste_button"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:background="@drawable/pill_button"
+                android:textColor="#FFFFFF"
                 android:text="@string/paste"
                 android:textAllCaps="false" />
         </LinearLayout>
@@ -129,6 +148,8 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
+            android:background="@drawable/pill_button"
+            android:textColor="#FFFFFF"
             android:text="@string/cancel"
             android:textAllCaps="false"
             android:visibility="gone" />
@@ -168,34 +189,6 @@
                 android:paddingTop="8dp" />
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/library_card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp"
-            android:layout_marginTop="12dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/library_label"
-                android:textSize="15sp" />
-            <TextView
-                android:id="@+id/library_empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingTop="10dp"
-                android:text="@string/library_empty"
-                android:textSize="14sp"
-                android:gravity="center" />
-            <LinearLayout
-                android:id="@+id/library_container"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="4dp" />
-        </LinearLayout>
-
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -215,6 +208,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:background="@drawable/pill_button"
+                android:textColor="#FFFFFF"
                 android:text="@string/nav_downloads"
                 android:textAllCaps="false" />
             <Button
@@ -222,6 +217,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:background="@drawable/pill_button"
+                android:textColor="#FFFFFF"
                 android:text="@string/nav_settings"
                 android:textAllCaps="false" />
         </LinearLayout>
