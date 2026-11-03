@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.taki.getgo'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.taki.getgo'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    // No external dependencies in v1 — pure Android framework only.
+    // This is deliberate: it keeps the app light, offline-buildable,
+    // and free of third-party trackers.
+}

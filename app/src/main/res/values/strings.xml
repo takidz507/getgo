@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GetGo</string>
+    <string name="paste_hint">Paste link here</string>
+    <string name="paste">Paste</string>
+    <string name="mode_video">Video</string>
+    <string name="mode_audio">Audio Only</string>
+    <string name="quality_label">Quality:</string>
+    <string name="download">Download</string>
+    <string name="cancel">Cancel</string>
+    <string name="recent_label">Recent downloads</string>
+    <string name="recent_empty">No downloads yet.\nPaste a link above and tap Download — your first file will appear here.</string>
+    <string name="library_label">Library</string>
+    <string name="library_empty">Your library is empty for now.\nDownloaded files will live here, on your device.</string>
+    <string name="nav_downloads">Downloads</string>
+    <string name="nav_settings">Settings</string>
+    <string name="settings_title">Settings</string>
+    <string name="dark_mode">Dark mode</string>
+    <string name="liquid_glass">Liquid glass</string>
+    <string name="liquid_glass_note">Off by default. When on, cards turn into translucent frosted glass. This is an Android lookalike, not Apple Liquid Glass.</string>
+    <string name="about_title">About</string>
+    <string name="github_line">GitHub: takidz507 — github.com/takidz507/getgo</string>
+    <string name="version_label">GetGo v1.0.0 — direct downloads only in v1</string>
+    <string name="legal_note">Download only content you have the right to save. GetGo does not break DRM or paywalls, and does not download paid courses you did not buy.</string>
+    <string name="status_pasted">Link pasted.</string>
+    <string name="status_empty_link">Paste a link first.</string>
+    <string name="status_bad_link">That link does not look like a web link. It must start with http:// or https://</string>
+    <string name="status_no_torrent">Torrents and magnets are not in GetGo v1.</string>
+    <string name="status_no_site_extraction">Site extraction is not in GetGo v1 yet. Paste a direct file link instead (for example a .mp4, .mp3, .pdf or .zip link).</string>
+    <string name="status_busy">A download is already running.</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_cancelled">Download cancelled.</string>
+    <string name="status_http_error">Download failed, server answered:</string>
+    <string name="status_failed">Download failed:</string>
+    <string name="status_done">Saved:</string>
+    <string name="status_audio_note">Audio extraction needs FFmpeg and is not in v1, so the original file was saved whole.</string>
+    <string name="open_failed">Could not open this file with another app:</string>
+</resources>

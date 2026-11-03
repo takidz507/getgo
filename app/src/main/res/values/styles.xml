@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Regular weights only, on purpose: no heavy bold type anywhere. -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg_light</item>
+        <item name="android:colorAccent">@color/accent</item>
+    </style>
+    <style name="AppTheme_Dark" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg_dark</item>
+        <item name="android:colorAccent">@color/accent_dark</item>
+    </style>
+</resources>
