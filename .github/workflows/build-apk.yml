@@ -23,10 +23,29 @@ jobs:
       # command instead of ./gradlew. Job name, workflow name and
       # artifact name are unchanged from v1.
       - uses: gradle/actions/setup-gradle@v3
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
-      - name: Upload APK
+      # v2.3.4 per-ABI: ONE codebase, five artifacts from one run.
+      # First the universal APK (all four ABIs, no -PtargetAbi),
+      # then one slim APK per ABI. All five share the same
+      # versionCode (set in app/build.gradle), so switching
+      # between them is never blocked as a downgrade. Gradle
+      # caches the Java compilation between runs; only the
+      # native-lib packaging changes per ABI.
+      - name: Build all APK variants
+        run: |
+          gradle assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk GetGo-universal.apk
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            gradle assembleDebug -PtargetAbi=$abi --stacktrace
+            cp app/build/outputs/apk/debug/app-debug.apk GetGo-$abi.apk
+          done
+          # NOTE: artifact names are version-free on purpose, so
+          # a future version bump cannot leave stale versioned
+          # names here. The release step renames them to
+          # GetGo-<tag>-<abi>.apk, which is what the in-app
+          # update check looks for.
+          ls -lh GetGo-*.apk
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: GetGo-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: GetGo-*.apk

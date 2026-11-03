@@ -70,7 +70,21 @@ public final class AppUpdate {
                         return;
                     }
                     final boolean available = isNewer(tag, current);
-                    final String page = RELEASES_PAGE + "/tag/" + tag;
+                    // v2.3.4 per-ABI: when the latest release
+                    // carries an asset for THIS device's ABI,
+                    // Update opens that asset's direct download
+                    // instead of the release page, so an arm64
+                    // phone gets the slim arm64 APK, not the
+                    // universal one. No matching asset (or an
+                    // unknown ABI) falls back to the release
+                    // page, where the universal APK is the
+                    // "if you don't know" choice.
+                    String page = RELEASES_PAGE + "/tag/" + tag;
+                    String asset = extractAssetUrl(body.toString(),
+                            tag, deviceAbi());
+                    if (asset != null) {
+                        page = asset;
+                    }
                     if (available) {
                         Prefs.setUpdateAvailable(ctx, true, tag, page);
                     } else {
@@ -91,6 +105,54 @@ public final class AppUpdate {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** This device's first supported ABI, e.g. "arm64-v8a". */
+    static String deviceAbi() {
+        try {
+            String[] abis = android.os.Build.SUPPORTED_ABIS;
+            if (abis != null && abis.length > 0) {
+                return abis[0];
+            }
+        } catch (Exception e) {
+            // fall through to the release-page fallback
+        }
+        return "";
+    }
+
+    /**
+     * Find the direct download URL of the asset named
+     * GetGo-&lt;tag&gt;-&lt;abi&gt;.apk in the releases JSON, without
+     * a JSON lib. In a GitHub asset object, "name" comes before
+     * "browser_download_url", so searching forward from the
+     * name stays inside the same asset. Returns null when the
+     * release carries no asset for this ABI.
+     */
+    static String extractAssetUrl(String json, String tag, String abi) {
+        if (abi == null || abi.length() == 0) {
+            return null;
+        }
+        String name = "\"name\": \"GetGo-" + tag + "-" + abi + ".apk\"";
+        int i = json.indexOf(name);
+        if (i < 0) {
+            // GitHub sometimes emits no space after the colon.
+            name = "\"name\":\"GetGo-" + tag + "-" + abi + ".apk\"";
+            i = json.indexOf(name);
+            if (i < 0) {
+                return null;
+            }
+        }
+        int j = json.indexOf("\"browser_download_url\"", i);
+        if (j < 0) {
+            return null;
+        }
+        int colon = json.indexOf(':', j);
+        int open = json.indexOf('"', colon);
+        int close = json.indexOf('"', open + 1);
+        if (colon < 0 || open < 0 || close < 0) {
+            return null;
+        }
+        return json.substring(open + 1, close);
     }
 
     /** Find "tag_name": "v2.3.0" in the releases JSON, without a JSON lib. */
