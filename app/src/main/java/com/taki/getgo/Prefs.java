@@ -16,6 +16,19 @@ public final class Prefs {
     private static final String KEY_UPDATE_AVAILABLE = "update_available";
     private static final String KEY_UPDATE_TAG = "update_tag";
     private static final String KEY_UPDATE_URL = "update_url";
+    // v2.4 paused download: one paused job at a time (GetGo only
+    // ever runs one download). Stored locally only. The partial
+    // file itself lives in the engine's temp dir (site) or as a
+    // named temp file (direct); these keys are just the recipe
+    // to resume it, so a paused job survives leaving the app
+    // and even a service restart.
+    private static final String KEY_PAUSED_LINK = "paused_link";
+    private static final String KEY_PAUSED_AUDIO = "paused_audio";
+    private static final String KEY_PAUSED_QUALITY = "paused_quality";
+    private static final String KEY_PAUSED_DIRECT = "paused_direct";
+    private static final String KEY_PAUSED_PERCENT = "paused_percent";
+    private static final String KEY_PAUSED_TEMP = "paused_temp";
+    private static final String KEY_PAUSED_DOWNLOADED = "paused_downloaded";
 
     private Prefs() {
     }
@@ -91,6 +104,66 @@ public final class Prefs {
 
     public static void clearUpdateAvailable(Context ctx) {
         setUpdateAvailable(ctx, false, "", "");
+    }
+
+    public static boolean hasPausedJob(Context ctx) {
+        String link = prefs(ctx).getString(KEY_PAUSED_LINK, "");
+        return link != null && !link.isEmpty();
+    }
+
+    public static void setPausedJob(Context ctx, String link,
+                                    boolean audioOnly, String quality,
+                                    boolean direct, int percent,
+                                    String tempName, long downloaded) {
+        prefs(ctx).edit()
+                .putString(KEY_PAUSED_LINK, link == null ? "" : link)
+                .putBoolean(KEY_PAUSED_AUDIO, audioOnly)
+                .putString(KEY_PAUSED_QUALITY, quality == null ? "" : quality)
+                .putBoolean(KEY_PAUSED_DIRECT, direct)
+                .putInt(KEY_PAUSED_PERCENT, percent)
+                .putString(KEY_PAUSED_TEMP, tempName == null ? "" : tempName)
+                .putLong(KEY_PAUSED_DOWNLOADED, downloaded)
+                .apply();
+    }
+
+    public static void clearPausedJob(Context ctx) {
+        prefs(ctx).edit()
+                .remove(KEY_PAUSED_LINK)
+                .remove(KEY_PAUSED_AUDIO)
+                .remove(KEY_PAUSED_QUALITY)
+                .remove(KEY_PAUSED_DIRECT)
+                .remove(KEY_PAUSED_PERCENT)
+                .remove(KEY_PAUSED_TEMP)
+                .remove(KEY_PAUSED_DOWNLOADED)
+                .apply();
+    }
+
+    public static String getPausedLink(Context ctx) {
+        return prefs(ctx).getString(KEY_PAUSED_LINK, "");
+    }
+
+    public static boolean isPausedAudio(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_PAUSED_AUDIO, false);
+    }
+
+    public static String getPausedQuality(Context ctx) {
+        return prefs(ctx).getString(KEY_PAUSED_QUALITY, "Best");
+    }
+
+    public static boolean isPausedDirect(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_PAUSED_DIRECT, false);
+    }
+
+    public static int getPausedPercent(Context ctx) {
+        return prefs(ctx).getInt(KEY_PAUSED_PERCENT, 0);
+    }
+
+    public static String getPausedTempName(Context ctx) {
+        return prefs(ctx).getString(KEY_PAUSED_TEMP, "");
+    }
+
+    public static long getPausedDownloaded(Context ctx) {
+        return prefs(ctx).getLong(KEY_PAUSED_DOWNLOADED, 0);
     }
 
     /**

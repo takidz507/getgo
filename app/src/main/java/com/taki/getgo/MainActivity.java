@@ -109,6 +109,7 @@ public class MainActivity extends Activity {
     private RadioGroup modeGroup;
     private Button downloadButton;
     private Button cancelButton;
+    private Button pauseButton;
     private ProgressBar progressBar;
     private TextView progressText;
     private TextView statusText;
@@ -153,6 +154,7 @@ public class MainActivity extends Activity {
         modeGroup = (RadioGroup) findViewById(R.id.mode_group);
         downloadButton = (Button) findViewById(R.id.download_button);
         cancelButton = (Button) findViewById(R.id.cancel_button);
+        pauseButton = (Button) findViewById(R.id.pause_button);
         progressBar = (ProgressBar) findViewById(R.id.progress_bar);
         progressText = (TextView) findViewById(R.id.progress_text);
         statusText = (TextView) findViewById(R.id.status_text);
@@ -170,6 +172,13 @@ public class MainActivity extends Activity {
         // Silent background check on launch: a new release only
         // lights the dot, it never downloads or installs anything.
         checkForUpdate(false);
+
+        // v2.4: a paused job survives leaving the app and even a
+        // service restart (Prefs + partial file), so reopening
+        // the app must offer Resume, not a blank screen.
+        if (Prefs.hasPausedJob(this)) {
+            showPausedUi();
+        }
 
         Button pasteButton = (Button) findViewById(R.id.paste_button);
         pasteButton.setOnClickListener(new View.OnClickListener() {
@@ -209,6 +218,27 @@ public class MainActivity extends Activity {
                 DownloadService.cancelDownload(MainActivity.this);
                 setStatus(getString(R.string.status_cancelled));
                 finishProgressUi();
+            }
+        });
+
+        // v2.4: one button, two states. While downloading it
+        // pauses; while paused it resumes. Cancel stays beside
+        // it in both states.
+        pauseButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                animatePress(v);
+                if (DownloadService.isPaused()
+                        || Prefs.hasPausedJob(MainActivity.this)) {
+                    setStatus(getString(R.string.status_connecting));
+                    DownloadService.resumeDownload(MainActivity.this);
+                    pauseButton.setText(getString(R.string.pause));
+                    AnimHelper.fadeIn(progressBar);
+                    pulseAnimator = AnimHelper.startPulse(downloadButton);
+                } else {
+                    DownloadService.pauseDownload(MainActivity.this);
+                    setStatus(getString(R.string.status_paused));
+                }
             }
         });
 
@@ -485,13 +515,23 @@ public class MainActivity extends Activity {
             setStatus(getString(R.string.status_busy));
             return;
         }
+        if (DownloadService.isPaused() || Prefs.hasPausedJob(this)) {
+            // A paused download owns the slot: starting another
+            // would wipe its partial files (see DownloadEngine).
+            setStatus(getString(R.string.status_paused_exists));
+            showPausedUi();
+            return;
+        }
         final boolean audioOnly = isAudioOnly();
         final String quality = qualitySpinner.getSelectedItem() != null
                 ? qualitySpinner.getSelectedItem().toString() : "Best";
         progressBar.setVisibility(View.VISIBLE);
         cancelButton.setVisibility(View.VISIBLE);
+        pauseButton.setVisibility(View.VISIBLE);
+        pauseButton.setText(getString(R.string.pause));
         AnimHelper.fadeIn(progressBar);
         AnimHelper.fadeIn(cancelButton);
+        AnimHelper.fadeIn(pauseButton);
         pulseAnimator = AnimHelper.startPulse(downloadButton);
         setProgress(0, getString(R.string.status_connecting));
         // v2.3: the service owns the download, so leaving the app
@@ -519,6 +559,8 @@ public class MainActivity extends Activity {
                             DownloadService.EXTRA_SAVED_FILE);
                     boolean finished = intent.getBooleanExtra(
                             DownloadService.EXTRA_FINISHED, false);
+                    boolean pausedState = intent.getBooleanExtra(
+                            DownloadService.EXTRA_PAUSED, false);
                     if (status != null && !status.isEmpty()) {
                         setStatus(status);
                     }
@@ -529,8 +571,20 @@ public class MainActivity extends Activity {
                         AnimHelper.completionBounce(downloadButton);
                         refreshLists();
                     }
-                    if (finished) {
-                        finishProgressUi();
+                    if (pausedState) {
+                        // Paused, not finished: stop the pulse,
+                        // keep the bar at its percent, offer Resume.
+                        AnimHelper.stopPulse(downloadButton, pulseAnimator);
+                        pulseAnimator = null;
+                        showPausedUi();
+                    } else if (finished) {
+                        if (Prefs.hasPausedJob(MainActivity.this)) {
+                            // A resume that failed keeps its job:
+                            // the user must still see Resume.
+                            showPausedUi();
+                        } else {
+                            finishProgressUi();
+                        }
                     }
                 }
             };
@@ -580,6 +634,28 @@ public class MainActivity extends Activity {
                 pulseAnimator = null;
                 AnimHelper.fadeOutToGone(progressBar, null);
                 AnimHelper.fadeOutToGone(cancelButton, null);
+                AnimHelper.fadeOutToGone(pauseButton, null);
+            }
+        });
+    }
+
+    /** v2.4 paused state: bar kept, Resume + Cancel shown. */
+    private void showPausedUi() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                String link = Prefs.getPausedLink(MainActivity.this);
+                if (link != null && !link.isEmpty()
+                        && linkInput.getText().toString().trim().isEmpty()) {
+                    linkInput.setText(link);
+                }
+                int pct = Prefs.getPausedPercent(MainActivity.this);
+                progressBar.setVisibility(View.VISIBLE);
+                setProgress(pct, pct + "%");
+                setStatus(getString(R.string.status_paused));
+                pauseButton.setText(getString(R.string.resume));
+                pauseButton.setVisibility(View.VISIBLE);
+                cancelButton.setVisibility(View.VISIBLE);
             }
         });
     }

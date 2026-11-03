@@ -8,6 +8,12 @@
     <string name="quality_label">Quality:</string>
     <string name="download">Download</string>
     <string name="cancel">Cancel</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="status_paused">Download paused.</string>
+    <string name="status_paused_exists">A paused download exists — resume or cancel it first.</string>
+    <string name="status_resume_kept">Your paused download is kept — tap Resume to try again.</string>
+    <string name="status_no_range">This server does not support resuming, so the download restarts from the beginning.</string>
     <string name="recent_label">Recent downloads</string>
     <string name="recent_empty">No downloads yet.\nPaste a link above and tap Download — your first file will appear here.</string>
     <string name="library_label">Library</string>
@@ -41,7 +47,7 @@
     <string name="liquid_glass_note">Off by default. When on, cards turn into layered translucent glass with a soft highlight. This is an Android lookalike, not Apple Liquid Glass.</string>
     <string name="about_title">About</string>
     <string name="github_line">GitHub: takidz507 — github.com/takidz507/getgo</string>
-    <string name="version_label">GetGo v2.3.4 — site downloads via yt-dlp, updated nightly</string>
+    <string name="version_label">GetGo v2.4.0 — site downloads via yt-dlp, updated nightly</string>
     <string name="status_preparing_engine">Preparing yt-dlp engine…</string>
     <string name="status_updating_ytdlp">Updating yt-dlp to the latest nightly version…</string>
     <string name="status_ytdlp_updated">yt-dlp updated:</string>

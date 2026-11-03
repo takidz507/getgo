@@ -41,6 +41,11 @@ public final class DownloadEngine {
         void onProgress(int percent, String text);
         void onSaved(String fileName, String quality);
         void onFinished();
+        // v2.4: default so existing listeners keep compiling.
+        // Fired INSTEAD of a failure when a download is paused:
+        // the partial file is kept and the job is saved in Prefs.
+        default void onPaused(int percent) {
+        }
     }
 
     private static final String EXTRACTOR_PROCESS_ID = "getgo-download";
@@ -50,7 +55,13 @@ public final class DownloadEngine {
     private final Context ctx;
     private final Listener listener;
     private volatile boolean cancelled;
+    private volatile boolean paused;
+    private volatile int lastPercent;
+    private volatile HttpURLConnection activeConn;
     private Thread thread;
+    private String curLink = "";
+    private boolean curAudio;
+    private String curQuality = "Best";
 
     public DownloadEngine(Context ctx, Listener listener) {
         this.ctx = ctx.getApplicationContext();
@@ -60,33 +71,135 @@ public final class DownloadEngine {
     public void start(final String rawLink, final boolean audioOnly,
                       final String quality) {
         cancelled = false;
+        paused = false;
+        lastPercent = 0;
+        curLink = rawLink;
+        curAudio = audioOnly;
+        curQuality = quality != null ? quality : "Best";
         final boolean direct = isDirectFileLink(rawLink);
         thread = new Thread(new Runnable() {
             @Override
             public void run() {
                 if (direct) {
-                    downloadDirect(rawLink, audioOnly, quality);
+                    downloadDirect(rawLink, audioOnly, quality, false, 0, null);
                 } else {
-                    downloadViaExtractor(rawLink, audioOnly, quality);
+                    downloadViaExtractor(rawLink, audioOnly, quality, false);
                 }
             }
         });
         thread.start();
     }
 
+    /** Resume the job saved in Prefs by pause(). Returns false if none. */
+    public boolean resumePaused() {
+        if (!Prefs.hasPausedJob(ctx)) {
+            return false;
+        }
+        final String link = Prefs.getPausedLink(ctx);
+        final boolean audioOnly = Prefs.isPausedAudio(ctx);
+        final String quality = Prefs.getPausedQuality(ctx);
+        final boolean direct = Prefs.isPausedDirect(ctx);
+        final String tempName = Prefs.getPausedTempName(ctx);
+        final long downloaded = Prefs.getPausedDownloaded(ctx);
+        cancelled = false;
+        paused = false;
+        lastPercent = Prefs.getPausedPercent(ctx);
+        curLink = link;
+        curAudio = audioOnly;
+        curQuality = quality;
+        thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                if (direct) {
+                    downloadDirect(link, audioOnly, quality, true,
+                            downloaded, tempName);
+                } else {
+                    downloadViaExtractor(link, audioOnly, quality, true);
+                }
+            }
+        });
+        thread.start();
+        return true;
+    }
+
     public boolean isRunning() {
         return thread != null && thread.isAlive();
     }
 
-    public void cancel() {
-        cancelled = true;
+    /**
+     * v2.4 pause: stop the running process but KEEP the partial
+     * file and save the job in Prefs, so resumePaused() can
+     * continue it with yt-dlp --continue (site) or an HTTP
+     * Range request (direct). Unlike cancel(), nothing is
+     * deleted here; the download thread itself records the
+     * paused job when it unwinds (see pauseReached()).
+     */
+    public void pause() {
+        if (!isRunning()) {
+            return;
+        }
+        paused = true;
         if (thread != null) {
             thread.interrupt();
+        }
+        if (activeConn != null) {
+            try {
+                activeConn.disconnect();
+            } catch (Exception ignored) {
+            }
         }
         try {
             YoutubeDL.getInstance().destroyProcessById(EXTRACTOR_PROCESS_ID);
         } catch (Exception ignored) {
         }
+    }
+
+    public void cancel() {
+        cancelled = true;
+        paused = false;
+        if (isRunning()) {
+            if (thread != null) {
+                thread.interrupt();
+            }
+            if (activeConn != null) {
+                try {
+                    activeConn.disconnect();
+                } catch (Exception ignored) {
+                }
+            }
+            try {
+                YoutubeDL.getInstance().destroyProcessById(EXTRACTOR_PROCESS_ID);
+            } catch (Exception ignored) {
+            }
+        } else {
+            // Cancelling a PAUSED job (no live thread): delete its
+            // partial files so they can never leak into a later
+            // download, then drop the saved job.
+            cleanupPausedFiles();
+            Prefs.clearPausedJob(ctx);
+        }
+    }
+
+    private void cleanupPausedFiles() {
+        try {
+            File tempDir = new File(ctx.getExternalFilesDir(null), "getgo-yt");
+            File[] files = tempDir.listFiles();
+            if (files != null) {
+                for (int i = 0; i < files.length; i++) {
+                    files[i].delete();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Shared pause exit: save the job, report it, finish the thread. */
+    private void pauseReached(boolean direct, String tempName, long downloaded) {
+        Prefs.setPausedJob(ctx, curLink, curAudio, curQuality, direct,
+                lastPercent, tempName, downloaded);
+        listener.onStatus(ctx.getString(R.string.status_paused));
+        listener.onPaused(lastPercent);
+        listener.onFinished();
     }
 
     private boolean isDirectFileLink(String rawLink) {
@@ -142,7 +255,8 @@ public final class DownloadEngine {
     }
 
     private void downloadViaExtractor(final String rawLink,
-            final boolean audioOnly, final String quality) {
+            final boolean audioOnly, final String quality,
+            final boolean resume) {
         try {
             if (!engineReady) {
                 listener.onStatus(ctx.getString(R.string.status_preparing_engine));
@@ -204,6 +318,10 @@ public final class DownloadEngine {
             } catch (Exception ignored) {
                 // Preview is a nicety, not a gate.
             }
+            if (paused) {
+                pauseReached(false, null, 0);
+                return;
+            }
             if (cancelled) {
                 listener.onStatus(ctx.getString(R.string.status_cancelled));
                 listener.onFinished();
@@ -218,10 +336,14 @@ public final class DownloadEngine {
             }
             // Clear stale temp files from a previous run, so the
             // "newest file" scan below cannot pick up an old one.
-            File[] stale = tempDir.listFiles();
-            if (stale != null) {
-                for (int i = 0; i < stale.length; i++) {
-                    stale[i].delete();
+            // NEVER on resume: those "stale" files ARE the paused
+            // download (.part + .ytdl) that --continue needs.
+            if (!resume) {
+                File[] stale = tempDir.listFiles();
+                if (stale != null) {
+                    for (int i = 0; i < stale.length; i++) {
+                        stale[i].delete();
+                    }
                 }
             }
 
@@ -229,6 +351,13 @@ public final class DownloadEngine {
             request.addOption("--no-playlist");
             request.addOption("--no-mtime");
             request.addOption("--restrict-filenames");
+            if (resume) {
+                // yt-dlp's own resume: partially downloaded
+                // files/fragments are continued, not restarted.
+                // This is the default, stated explicitly so a
+                // future option change cannot silently drop it.
+                request.addOption("--continue");
+            }
             request.addOption("-o", tempDir.getAbsolutePath() + "/%(title)s.%(ext)s");
             if (audioOnly) {
                 request.addOption("-f", "bestaudio");
@@ -249,6 +378,7 @@ public final class DownloadEngine {
                                 if (pct > 100) {
                                     pct = 100;
                                 }
+                                lastPercent = pct;
                                 String text = line != null && !line.isEmpty()
                                         ? line : pct + "%";
                                 listener.onProgress(pct, text);
@@ -258,6 +388,10 @@ public final class DownloadEngine {
                     };
             YoutubeDL.getInstance().execute(request, EXTRACTOR_PROCESS_ID, callback);
 
+            if (paused) {
+                pauseReached(false, null, 0);
+                return;
+            }
             if (cancelled) {
                 listener.onStatus(ctx.getString(R.string.status_cancelled));
                 listener.onFinished();
@@ -279,22 +413,46 @@ public final class DownloadEngine {
                 listener.onFinished();
                 return;
             }
-            moveTempFileToLibrary(best, quality);
+            if (moveTempFileToLibrary(best, quality)) {
+                // A completed download is not a paused job any more.
+                // Only cleared on a real save: if the move failed,
+                // the partial stays resumable.
+                Prefs.clearPausedJob(ctx);
+            }
         } catch (YoutubeDLException e) {
-            // yt-dlp's own failure: unsupported site, login-only
-            // content, DRM, or a site that changed. Say so plainly
-            // instead of blaming the network or the user.
-            listener.onStatus(ctx.getString(R.string.status_site_failed)
-                    + " " + (e.getMessage() != null ? e.getMessage() : ""));
+            if (paused) {
+                // Killed by pause(), not by the site: the partial
+                // files are still in tempDir, so keep the job.
+                pauseReached(false, null, 0);
+            } else {
+                // yt-dlp's own failure: unsupported site, login-only
+                // content, DRM, or a site that changed. Say so plainly
+                // instead of blaming the network or the user.
+                String msg = ctx.getString(R.string.status_site_failed)
+                        + " " + (e.getMessage() != null ? e.getMessage() : "");
+                if (resume) {
+                    msg += " " + ctx.getString(R.string.status_resume_kept);
+                }
+                listener.onStatus(msg);
+            }
         } catch (Exception e) {
-            listener.onStatus(ctx.getString(R.string.status_failed)
-                    + " " + (e.getMessage() != null ? e.getMessage() : ""));
+            if (paused) {
+                pauseReached(false, null, 0);
+            } else {
+                String msg = ctx.getString(R.string.status_failed)
+                        + " " + (e.getMessage() != null ? e.getMessage() : "");
+                if (resume) {
+                    msg += " " + ctx.getString(R.string.status_resume_kept);
+                }
+                listener.onStatus(msg);
+            }
         } finally {
             listener.onFinished();
         }
     }
 
-    private void moveTempFileToLibrary(File tempFile, String quality) {
+    /** Returns true only when the file was actually saved. */
+    private boolean moveTempFileToLibrary(File tempFile, String quality) {
         OutputStream out = null;
         Uri savedUri = null;
         try {
@@ -341,9 +499,11 @@ public final class DownloadEngine {
             listener.onStatus(ctx.getString(R.string.status_done) + " " + fileName
                     + " (" + quality + ")");
             listener.onSaved(fileName, quality);
+            return true;
         } catch (Exception e) {
             listener.onStatus(ctx.getString(R.string.status_failed)
                     + " " + (e.getMessage() != null ? e.getMessage() : ""));
+            return false;
         } finally {
             try {
                 if (out != null) {
@@ -354,22 +514,67 @@ public final class DownloadEngine {
         }
     }
 
-    private void downloadDirect(String rawLink, boolean audioOnly, String quality) {
+    /**
+     * v2.4 direct downloads go through a temp file first (same
+     * getgo-yt dir as site downloads), so pause/resume works
+     * here too: pause keeps the temp file + a Prefs job, resume
+     * re-opens it with an HTTP Range request. Only on success
+     * is the file moved into Download/GetGo via MediaStore
+     * (previously a cancelled direct download could leave an
+     * orphan partial file in the public folder).
+     */
+    private void downloadDirect(String rawLink, boolean audioOnly, String quality,
+                                boolean resume, long resumeDownloaded,
+                                String resumeTempName) {
         HttpURLConnection conn = null;
         OutputStream out = null;
-        Uri savedUri = null;
         String fileName = null;
+        File tempFile = null;
+        String tempName = null;
+        // Declared outside try so the catch path can save the
+        // exact byte count already written, not the stale resume
+        // offset (appending from a stale offset would duplicate
+        // bytes in the temp file).
+        long downloaded = resume ? resumeDownloaded : 0;
         try {
+            File tempDir = new File(ctx.getExternalFilesDir(null), "getgo-yt");
+            if (!tempDir.exists() && !tempDir.mkdirs() && !tempDir.exists()) {
+                listener.onStatus(ctx.getString(R.string.status_failed) + " temp dir");
+                listener.onFinished();
+                return;
+            }
             URL url = new URL(rawLink);
             conn = (HttpURLConnection) url.openConnection();
+            activeConn = conn;
             conn.setRequestProperty("User-Agent", "GetGo/1.0");
+            if (resume && downloaded > 0) {
+                conn.setRequestProperty("Range", "bytes=" + downloaded + "-");
+            }
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
             conn.setInstanceFollowRedirects(true);
             conn.connect();
             int code = conn.getResponseCode();
+            if (resume && code == 416) {
+                // Range beyond the file: the temp file is already
+                // complete. Save it instead of failing.
+                tempFile = new File(tempDir, resumeTempName);
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    File finalTemp = new File(tempDir,
+                            tempFile.getName().replaceFirst("^direct_", ""));
+                    tempFile.renameTo(finalTemp);
+                    if (moveTempFileToLibrary(finalTemp, quality)) {
+                        Prefs.clearPausedJob(ctx);
+                    }
+                    return;
+                }
+            }
             if (code < 200 || code >= 300) {
-                listener.onStatus(ctx.getString(R.string.status_http_error) + " " + code);
+                String msg = ctx.getString(R.string.status_http_error) + " " + code;
+                if (resume) {
+                    msg += " " + ctx.getString(R.string.status_resume_kept);
+                }
+                listener.onStatus(msg);
                 listener.onFinished();
                 return;
             }
@@ -382,51 +587,68 @@ public final class DownloadEngine {
                 return;
             }
             fileName = fileNameFrom(conn, rawLink);
-            long total = conn.getContentLengthLong();
             boolean isVideoFile = fileName.toLowerCase().endsWith(".mp4")
                     || fileName.toLowerCase().endsWith(".mkv")
                     || fileName.toLowerCase().endsWith(".webm");
             if (audioOnly && isVideoFile) {
                 listener.onStatus(ctx.getString(R.string.status_audio_note));
             }
-
-            if (Build.VERSION.SDK_INT >= 29) {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-                values.put(MediaStore.Downloads.MIME_TYPE,
-                        contentType != null ? contentType.split(";")[0] : "application/octet-stream");
-                values.put(MediaStore.Downloads.RELATIVE_PATH, "Download/GetGo");
-                savedUri = ctx.getContentResolver().insert(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (savedUri == null) {
-                    throw new Exception("MediaStore insert returned null");
+            if (resume && downloaded > 0 && code == 200) {
+                // Server ignored Range: it cannot resume, so the
+                // honest fallback is a restart, said out loud.
+                listener.onStatus(ctx.getString(R.string.status_no_range));
+                conn.disconnect();
+                downloaded = 0;
+                tempName = resumeTempName;
+                conn = (HttpURLConnection) url.openConnection();
+                activeConn = conn;
+                conn.setRequestProperty("User-Agent", "GetGo/1.0");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(30000);
+                conn.setInstanceFollowRedirects(true);
+                conn.connect();
+                code = conn.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    listener.onStatus(ctx.getString(R.string.status_http_error)
+                            + " " + code);
+                    listener.onFinished();
+                    return;
                 }
-                out = ctx.getContentResolver().openOutputStream(savedUri);
-            } else {
-                File dir = new File(ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "GetGo");
-                if (!dir.exists()) {
-                    dir.mkdirs();
-                }
-                File file = new File(dir, fileName);
-                savedUri = Uri.fromFile(file);
-                out = new FileOutputStream(file);
             }
+            long remaining = conn.getContentLengthLong();
+            long total = remaining > 0 ? downloaded + remaining : -1;
+            tempName = resume ? resumeTempName : "direct_" + fileName;
+            tempFile = new File(tempDir, tempName);
+            out = new FileOutputStream(tempFile, resume && downloaded > 0
+                    && code == 206);
             if (out == null) {
                 throw new Exception("Could not open output stream");
             }
             InputStream in = conn.getInputStream();
             byte[] buffer = new byte[8192];
-            long downloaded = 0;
             int read;
             long lastUi = 0;
             while ((read = in.read(buffer)) != -1) {
-                if (cancelled || Thread.currentThread().isInterrupted()) {
-                    listener.onStatus(ctx.getString(R.string.status_cancelled));
-                    listener.onFinished();
+                if (paused) {
                     try {
                         out.close();
                     } catch (Exception ignored) {
                     }
+                    out = null;
+                    lastPercent = total > 0 ? (int) (downloaded * 100 / total) : 0;
+                    pauseReached(true, tempName, downloaded);
+                    return;
+                }
+                if (cancelled || Thread.currentThread().isInterrupted()) {
+                    try {
+                        out.close();
+                    } catch (Exception ignored) {
+                    }
+                    out = null;
+                    tempFile.delete();
+                    Prefs.clearPausedJob(ctx);
+                    listener.onStatus(ctx.getString(R.string.status_cancelled));
+                    listener.onFinished();
                     return;
                 }
                 out.write(buffer, 0, read);
@@ -436,6 +658,7 @@ public final class DownloadEngine {
                     lastUi = now;
                     if (total > 0) {
                         int pct = (int) (downloaded * 100 / total);
+                        lastPercent = pct;
                         listener.onProgress(pct, DownloadIndex.formatSize(downloaded)
                                 + " / " + DownloadIndex.formatSize(total));
                     } else {
@@ -445,20 +668,30 @@ public final class DownloadEngine {
             }
             out.close();
             out = null;
-            DownloadIndex.append(ctx, new DownloadIndex.Entry(
-                    fileName, downloaded, savedUri.toString(), System.currentTimeMillis()));
-            listener.onProgress(100, DownloadIndex.formatSize(downloaded));
-            String done = ctx.getString(R.string.status_done) + " " + fileName;
-            if (audioOnly && isVideoFile) {
-                done += " — " + ctx.getString(R.string.status_audio_note);
+            File finalTemp = new File(tempDir, fileName);
+            if (!tempFile.getAbsolutePath().equals(finalTemp.getAbsolutePath())) {
+                tempFile.renameTo(finalTemp);
             }
-            // Quality is a real choice for future site streams; for a
-            // direct file the file is saved as-is, and v1 says so.
-            done += " (" + quality + ")";
-            listener.onStatus(done);
-            listener.onSaved(fileName, quality);
+            if (moveTempFileToLibrary(finalTemp, quality)) {
+                Prefs.clearPausedJob(ctx);
+                if (audioOnly && isVideoFile) {
+                    // moveTempFileToLibrary already reported Saved;
+                    // keep v1's direct-file audio note as well.
+                    listener.onStatus(ctx.getString(R.string.status_done) + " " + fileName
+                            + " — " + ctx.getString(R.string.status_audio_note)
+                            + " (" + quality + ")");
+                }
+            }
         } catch (Exception e) {
-            listener.onStatus(ctx.getString(R.string.status_failed) + " " + e.getMessage());
+            if (paused) {
+                pauseReached(true, tempName, downloaded);
+            } else {
+                String msg = ctx.getString(R.string.status_failed) + " " + e.getMessage();
+                if (resume) {
+                    msg += " " + ctx.getString(R.string.status_resume_kept);
+                }
+                listener.onStatus(msg);
+            }
         } finally {
             try {
                 if (out != null) {
@@ -469,6 +702,7 @@ public final class DownloadEngine {
             if (conn != null) {
                 conn.disconnect();
             }
+            activeConn = null;
             listener.onFinished();
         }
     }

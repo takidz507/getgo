@@ -22,6 +22,12 @@ public class ShareReceiverActivity extends Activity {
         if (link == null) {
             Toast.makeText(this, getString(R.string.share_no_link),
                     Toast.LENGTH_SHORT).show();
+        } else if (DownloadService.isPaused() || Prefs.hasPausedJob(this)) {
+            // v2.4: a paused download owns the slot, so a shared
+            // link cannot start until it is resumed or cancelled.
+            // Say so instead of the usual "downloading" toast.
+            Toast.makeText(this, getString(R.string.status_paused_exists),
+                    Toast.LENGTH_LONG).show();
         } else {
             DownloadService.startDownload(this, link, false, "Best");
             Toast.makeText(this, getString(R.string.share_downloading),

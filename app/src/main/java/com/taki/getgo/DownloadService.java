@@ -25,6 +25,9 @@ import android.os.IBinder;
 public class DownloadService extends Service {
     public static final String ACTION_START = "com.taki.getgo.START_DOWNLOAD";
     public static final String ACTION_CANCEL = "com.taki.getgo.CANCEL_DOWNLOAD";
+    // v2.4 pause/resume, in the app and in the notification.
+    public static final String ACTION_PAUSE = "com.taki.getgo.PAUSE_DOWNLOAD";
+    public static final String ACTION_RESUME = "com.taki.getgo.RESUME_DOWNLOAD";
     public static final String EXTRA_LINK = "link";
     public static final String EXTRA_AUDIO = "audio_only";
     public static final String EXTRA_QUALITY = "quality";
@@ -37,12 +40,14 @@ public class DownloadService extends Service {
     public static final String EXTRA_STATUS = "status";
     public static final String EXTRA_SAVED_FILE = "saved_file";
     public static final String EXTRA_FINISHED = "finished";
+    public static final String EXTRA_PAUSED = "paused";
 
     private static final String CHANNEL_ID = "getgo_downloads";
     private static final int NOTIF_ID = 1;
     private static final int DONE_NOTIF_ID = 2;
 
     private static volatile boolean running = false;
+    private static volatile boolean paused = false;
 
     private DownloadEngine engine;
     private NotificationManager notifManager;
@@ -50,10 +55,33 @@ public class DownloadService extends Service {
     private String savedFile = null;
     private String lastStatus = "";
     private boolean cancelledByUser = false;
+    private boolean pausedByUser = false;
+    private int lastPercent = 0;
     private long lastNotifUpdate = 0;
 
     public static boolean isRunning() {
         return running;
+    }
+
+    /** A paused download still occupies the one-download slot. */
+    public static boolean isPaused() {
+        return paused;
+    }
+
+    public static void pauseDownload(Context ctx) {
+        Intent intent = new Intent(ctx, DownloadService.class);
+        intent.setAction(ACTION_PAUSE);
+        ctx.startService(intent);
+    }
+
+    public static void resumeDownload(Context ctx) {
+        Intent intent = new Intent(ctx, DownloadService.class);
+        intent.setAction(ACTION_RESUME);
+        if (Build.VERSION.SDK_INT >= 26) {
+            ctx.startForegroundService(intent);
+        } else {
+            ctx.startService(intent);
+        }
     }
 
     public static void startDownload(Context ctx, String link,
@@ -96,10 +124,52 @@ public class DownloadService extends Service {
         }
         if (ACTION_CANCEL.equals(intent.getAction())) {
             cancelledByUser = true;
+            pausedByUser = false;
+            paused = false;
             if (engine != null) {
                 engine.cancel();
+                if (!engine.isRunning()) {
+                    // Paused job (dead thread): no onFinished
+                    // will arrive to stop the service, so stop
+                    // here. A live download's onFinished does it.
+                    stopForeground(true);
+                    stopSelf();
+                }
             } else {
+                // No engine at all (service restarted for a
+                // cancel): clear the saved job + partials here.
+                Prefs.clearPausedJob(this);
                 stopForeground(true);
+                stopSelf();
+            }
+            broadcast(-1, "", getString(R.string.status_cancelled), null, true);
+            return START_NOT_STICKY;
+        }
+        if (ACTION_PAUSE.equals(intent.getAction())) {
+            if (engine != null && running) {
+                engine.pause();
+            }
+            return START_NOT_STICKY;
+        }
+        if (ACTION_RESUME.equals(intent.getAction())) {
+            if (!paused && !Prefs.hasPausedJob(this)) {
+                return START_NOT_STICKY;
+            }
+            // Resume re-uses the same engine slot: the service
+            // goes foreground again with a progress notification.
+            pausedByUser = false;
+            paused = false;
+            running = true;
+            cancelledByUser = false;
+            savedFile = null;
+            lastStatus = getString(R.string.status_connecting);
+            startForeground(NOTIF_ID, buildProgressNotification(
+                    Prefs.getPausedPercent(this), lastStatus));
+            if (engine == null) {
+                engine = newEngine();
+            }
+            if (!engine.resumePaused()) {
+                running = false;
                 stopSelf();
             }
             return START_NOT_STICKY;
@@ -107,9 +177,16 @@ public class DownloadService extends Service {
         if (!ACTION_START.equals(intent.getAction())) {
             return START_NOT_STICKY;
         }
-        if (running) {
-            // One download at a time, same as the old UI rule.
-            broadcast(-1, "", getString(R.string.status_busy), null, false);
+        if (running || paused || Prefs.hasPausedJob(this)) {
+            // One download at a time, same as the old UI rule —
+            // and a paused download still owns the slot, or a
+            // new start would wipe its partial files.
+            if (paused || Prefs.hasPausedJob(this)) {
+                broadcast(-1, "", getString(R.string.status_paused_exists),
+                        null, false);
+            } else {
+                broadcast(-1, "", getString(R.string.status_busy), null, false);
+            }
             return START_NOT_STICKY;
         }
         final String link = intent.getStringExtra(EXTRA_LINK);
@@ -121,20 +198,35 @@ public class DownloadService extends Service {
         }
         running = true;
         cancelledByUser = false;
+        pausedByUser = false;
         savedFile = null;
         currentLink = link;
         lastStatus = getString(R.string.status_connecting);
         startForeground(NOTIF_ID, buildProgressNotification(0, lastStatus));
-        engine = new DownloadEngine(this, new DownloadEngine.Listener() {
+        engine = newEngine();
+        engine.start(link, audioOnly, quality != null ? quality : "Best");
+        return START_NOT_STICKY;
+    }
+
+    /**
+     * One Listener for every engine use (fresh start and resume),
+     * so pause/resume state lives in the service, not in two
+     * copies of this block.
+     */
+    private DownloadEngine newEngine() {
+        return new DownloadEngine(this, new DownloadEngine.Listener() {
             @Override
             public void onStatus(String text) {
                 lastStatus = text;
-                updateProgressNotification(-1, text);
+                if (!pausedByUser) {
+                    updateProgressNotification(-1, text);
+                }
                 broadcast(-1, "", text, null, false);
             }
 
             @Override
             public void onProgress(int percent, String text) {
+                lastPercent = percent;
                 updateProgressNotification(percent, text);
                 broadcast(percent, text, null, null, false);
             }
@@ -145,8 +237,31 @@ public class DownloadService extends Service {
             }
 
             @Override
-            public void onFinished() {
+            public void onPaused(int percent) {
+                // The engine thread is ending, but the service
+                // STAYS foreground with a paused notification
+                // (Resume + Cancel), so resume works from the
+                // notification even after leaving the app. The
+                // onFinished() that follows this is ignored
+                // (see pausedByUser check there).
+                pausedByUser = true;
+                paused = true;
                 running = false;
+                lastPercent = percent;
+                lastStatus = getString(R.string.status_paused);
+                showPausedNotification(percent);
+                broadcastPaused(percent);
+            }
+
+            @Override
+            public void onFinished() {
+                if (pausedByUser) {
+                    // Paused, not finished: keep the service and
+                    // its paused notification alive for Resume.
+                    return;
+                }
+                running = false;
+                paused = false;
                 if (cancelledByUser) {
                     stopForeground(true);
                     broadcast(-1, "", getString(R.string.status_cancelled),
@@ -179,8 +294,6 @@ public class DownloadService extends Service {
                 stopSelf();
             }
         });
-        engine.start(link, audioOnly, quality != null ? quality : "Best");
-        return START_NOT_STICKY;
     }
 
     private void broadcast(int percent, String text, String status,
@@ -191,7 +304,31 @@ public class DownloadService extends Service {
         intent.putExtra(EXTRA_STATUS, status == null ? "" : status);
         intent.putExtra(EXTRA_SAVED_FILE, savedFile == null ? "" : savedFile);
         intent.putExtra(EXTRA_FINISHED, finished);
+        intent.putExtra(EXTRA_PAUSED, false);
         sendBroadcast(intent);
+    }
+
+    private void broadcastPaused(int percent) {
+        Intent intent = new Intent(ACTION_PROGRESS);
+        intent.putExtra(EXTRA_PERCENT, percent);
+        intent.putExtra(EXTRA_TEXT, "");
+        intent.putExtra(EXTRA_STATUS, getString(R.string.status_paused));
+        intent.putExtra(EXTRA_SAVED_FILE, "");
+        intent.putExtra(EXTRA_FINISHED, false);
+        intent.putExtra(EXTRA_PAUSED, true);
+        sendBroadcast(intent);
+    }
+
+    private void showPausedNotification(int percent) {
+        if (notifManager == null) {
+            return;
+        }
+        Notification.Builder builder = baseBuilderWithActions(false, true, true)
+                .setContentTitle(getString(R.string.status_paused))
+                .setContentText(getString(R.string.status_paused) + " " + percent + "%")
+                .setProgress(100, percent, false)
+                .setOngoing(true);
+        notifManager.notify(NOTIF_ID, builder.build());
     }
 
     private void updateProgressNotification(int percent, String text) {
@@ -207,7 +344,7 @@ public class DownloadService extends Service {
         }
         int pct = percent < 0 ? -1 : percent;
         String content = text != null && !text.isEmpty() ? text : lastStatus;
-        Notification.Builder builder = baseBuilder(true)
+        Notification.Builder builder = baseBuilderWithActions(true, false, true)
                 .setContentTitle(getString(R.string.notif_downloading))
                 .setContentText(content)
                 .setOngoing(true);
@@ -218,7 +355,7 @@ public class DownloadService extends Service {
     }
 
     private Notification buildProgressNotification(int percent, String text) {
-        return baseBuilder(true)
+        return baseBuilderWithActions(true, false, true)
                 .setContentTitle(getString(R.string.notif_downloading))
                 .setContentText(text)
                 .setProgress(100, percent, false)
@@ -231,7 +368,7 @@ public class DownloadService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT
                         | PendingIntent.FLAG_IMMUTABLE);
-        return baseBuilder(false)
+        return baseBuilderWithActions(false, false, false)
                 .setContentTitle("GetGo")
                 .setContentText(text)
                 .setContentIntent(pi)
@@ -240,7 +377,15 @@ public class DownloadService extends Service {
                 .build();
     }
 
-    private Notification.Builder baseBuilder(boolean withCancel) {
+    /**
+     * Notification actions, with distinct request codes so the
+     * Pause/Resume/Cancel PendingIntents can never collapse
+     * into each other (same service, same request code would
+     * be a real risk with FLAG_UPDATE_CURRENT).
+     */
+    private Notification.Builder baseBuilderWithActions(boolean withPause,
+                                                        boolean withResume,
+                                                        boolean withCancel) {
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= 26) {
             builder = new Notification.Builder(this, CHANNEL_ID);
@@ -253,10 +398,28 @@ public class DownloadService extends Service {
                         | PendingIntent.FLAG_IMMUTABLE);
         builder.setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentIntent(tap);
+        if (withPause) {
+            Intent pause = new Intent(this, DownloadService.class);
+            pause.setAction(ACTION_PAUSE);
+            PendingIntent pausePi = PendingIntent.getService(this, 2, pause,
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                            | PendingIntent.FLAG_IMMUTABLE);
+            builder.addAction(android.R.drawable.ic_media_pause,
+                    getString(R.string.pause), pausePi);
+        }
+        if (withResume) {
+            Intent resume = new Intent(this, DownloadService.class);
+            resume.setAction(ACTION_RESUME);
+            PendingIntent resumePi = PendingIntent.getService(this, 3, resume,
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                            | PendingIntent.FLAG_IMMUTABLE);
+            builder.addAction(android.R.drawable.ic_media_play,
+                    getString(R.string.resume), resumePi);
+        }
         if (withCancel) {
             Intent cancel = new Intent(this, DownloadService.class);
             cancel.setAction(ACTION_CANCEL);
-            PendingIntent cancelPi = PendingIntent.getService(this, 0, cancel,
+            PendingIntent cancelPi = PendingIntent.getService(this, 1, cancel,
                     PendingIntent.FLAG_UPDATE_CURRENT
                             | PendingIntent.FLAG_IMMUTABLE);
             builder.addAction(android.R.drawable.ic_delete,
@@ -268,6 +431,7 @@ public class DownloadService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        paused = false;
         super.onDestroy();
     }
 
