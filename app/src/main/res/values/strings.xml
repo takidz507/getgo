@@ -20,19 +20,24 @@
     <string name="liquid_glass_note">Off by default. When on, cards turn into translucent frosted glass. This is an Android lookalike, not Apple Liquid Glass.</string>
     <string name="about_title">About</string>
     <string name="github_line">GitHub: takidz507 — github.com/takidz507/getgo</string>
-    <string name="version_label">GetGo v1.0.0 — direct downloads only in v1</string>
+    <string name="version_label">GetGo v2.0.0 — site downloads via yt-dlp</string>
+    <string name="status_preparing_engine">Preparing yt-dlp engine…</string>
+    <string name="status_found">Found:</string>
+    <string name="status_engine_failed">yt-dlp engine failed to start:</string>
+    <string name="status_no_file">Extractor finished but no file was created.</string>
+    <string name="status_site_failed">Site download failed. yt-dlp could not extract this link — it may need a login you do not have, be DRM-protected, or be a site yt-dlp no longer supports.</string>
     <string name="legal_note">Download only content you have the right to save. GetGo does not break DRM or paywalls, and does not download paid courses you did not buy.</string>
     <string name="status_pasted">Link pasted.</string>
     <string name="status_empty_link">Paste a link first.</string>
     <string name="status_bad_link">That link does not look like a web link. It must start with http:// or https://</string>
     <string name="status_no_torrent">Torrents and magnets are not in GetGo v1.</string>
-    <string name="status_no_site_extraction">Site extraction is not in GetGo v1 yet. Paste a direct file link instead (for example a .mp4, .mp3, .pdf or .zip link).</string>
+    <string name="status_no_site_extraction">That page returned HTML, not a file, and the extractor could not find a video here.</string>
     <string name="status_busy">A download is already running.</string>
     <string name="status_connecting">Connecting…</string>
     <string name="status_cancelled">Download cancelled.</string>
     <string name="status_http_error">Download failed, server answered:</string>
     <string name="status_failed">Download failed:</string>
     <string name="status_done">Saved:</string>
-    <string name="status_audio_note">Audio extraction needs FFmpeg and is not in v1, so the original file was saved whole.</string>
+    <string name="status_audio_note">Audio extraction is not done for direct files, so the original file was saved whole. For site links, Audio Only extracts real audio via FFmpeg.</string>
     <string name="open_failed">Could not open this file with another app:</string>
 </resources>

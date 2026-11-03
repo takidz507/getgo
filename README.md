@@ -1,105 +1,108 @@
 # GetGo
 
 A simple, easy, fun, open-source Android downloader.
-By Taki — GitHub: takidz507 — planned repo: https://github.com/takidz507/getgo
+By Taki — GitHub: takidz507 — https://github.com/takidz507/getgo
 
-> **Repo note:** the repo above does not exist yet at the time of
-> this v1 build. The link is the planned home, not a published page.
-> Do not treat it as live until the project is published.
+## What GetGo v2 does
 
-## What GetGo v1 does
-
-- **Design 1 — One-Tap Hero:** paste a link on top, one large
-  central Download button, recent downloads as chips below,
-  bottom navigation with Downloads and Settings only.
-- **Paste a direct file link**, choose **Video or Audio Only**,
-  choose a quality, and download with a progress bar and Cancel.
+- **Design 1 — One-Tap Hero, unchanged:** paste a link on top,
+  one large central Download button, recent downloads as chips
+  below, bottom navigation with Downloads and Settings only.
+- **Download capability ONLY — not a full OmniGet clone.**
+  No PDF/EPUB reader, no music player, no 158 tools, no
+  flashcards, no MCP, no torrent, no course login. Those
+  desktop-OmniGet features are deliberately out of scope.
+- **Site downloads via yt-dlp:** paste ANY link yt-dlp
+  supports — YouTube, TikTok, Instagram, X, Facebook, Vimeo,
+  and the rest of yt-dlp's extractor list — and it goes through
+  the same generic flow: title preview, real quality choice,
+  Video or Audio Only, download, local library. There is no
+  per-site allowlist in v2; if yt-dlp recognises the link it
+  is attempted, and if it does not, the failure is shown
+  honestly instead of saving an HTML page as a fake video.
+- **Real quality, not a fake spinner:** Video quality maps to
+  a real yt-dlp format selector (Best, or a height cap of
+  1080p / 720p / 480p / 360p). A capped choice has NO final
+  "/best" fallback, so a video with no stream at or below the
+  cap fails clearly instead of silently downloading a higher
+  quality than chosen. Audio Only uses bestaudio + FFmpeg
+  extraction to MP3 (128K / 96K / best VBR).
+- **Direct file links still work** (.mp4, .mp3, .pdf, .zip, …)
+  on the fast v1 path, without touching the extractor.
+  Playlists are NOT downloaded whole: `--no-playlist` is
+  always passed, so a playlist link downloads only that video.
 - **Local library** of files this app downloaded, saved to
   `Download/GetGo` on the device. Tap a file to try to open it
   with another app.
-- **Settings (simple):** Dark mode toggle, Liquid Glass toggle
-  (default OFF), a small About card, a GitHub line, and a legal note.
+- **Settings (simple, unchanged):** Dark mode toggle, Liquid
+  Glass toggle (default OFF), a small About card, a GitHub
+  line, and a legal note.
 - **No account, no ads, no telemetry, no server.** Your files
-  stay on your device. Only the `INTERNET` and
-  `ACCESS_NETWORK_STATE` permissions are requested — no storage,
-  location, contact, or any other permission.
+  stay on your device. Permissions are `INTERNET` and
+  `ACCESS_NETWORK_STATE` only — the extractor needs no new
+  permission, because it writes under the app's own external
+  files dir first and the app then moves the finished file
+  into Download/GetGo via MediaStore, exactly as v1 did.
 
-## What GetGo v1 does NOT do — read this before judging it
+## What GetGo v2 does NOT do — read this before judging it
 
-This is a verified **partial** v1, not a clone of desktop OmniGet,
-and it does not pretend otherwise:
-
-- **No YouTube / TikTok / Instagram / X site extraction.**
-  Those domains are detected and refused with a clear in-app
-  message. A yt-dlp-style extractor is NOT bundled in v1, so
-  pasting a video-page link will not produce a video, and the app
-  will not silently save the page's HTML and call it a video.
-  If a page returns HTML instead of a file, the download is refused.
+- **No DRM breaking, no paywall bypass, no login for an
+  account you do not own.** Sites that need those simply
+  fail in the extractor, and that is by design, not a bug
+  to be "fixed" by a bypass.
 - **No torrent / magnet.** Deliberately out of scope.
-- **No Udemy / Hotmart course downloader with login.** Out of scope.
-- **No audio extraction.** If you pick Audio Only for a video
-  file, v1 saves the original file whole and says so. Real audio
-  extraction needs FFmpeg, which is not in v1.
+- **No Udemy / Hotmart course downloader with login.**
+  Out of scope.
 - **No in-app player, no flashcards, no MCP, no 158 tools.**
   Those belong to desktop OmniGet, not to this simple app.
-- **Quality** is a real choice in the UI. For a direct file the
-  file is saved as-is (there is only one file to save); quality
-  will matter for site streams if a future extractor is added.
-- **Pause/resume:** Cancel stops a download; resume of a partial
-  download is not in v1.
+- **No resume:** Cancel stops a download; resume of a partial
+  download is not in v2.
+- **Site extractors break when sites change.** yt-dlp's
+  extractors are maintained upstream; a site that worked
+  yesterday can fail tomorrow until yt-dlp is updated. GetGo
+  v2 does NOT auto-update yt-dlp in-app (that is a future
+  option, not a hidden behaviour).
 
-## Polish in v1 (inside the locked scope)
+## Size — v2 will be much larger than v1, honestly
 
-- Beautiful empty states for Recent and Library, instead of
-  blank space, when nothing has been downloaded yet.
-- Light press feedback (a short shrink-and-return on buttons)
-  and a 300 ms fade-in when the lists refresh — no heavy motion,
-  nothing that slows the app.
+- v1 was 38,028 bytes because it had zero dependencies.
+- v2 bundles a Python runtime + yt-dlp + FFmpeg for all four
+  ABIs (arm64-v8a, armeabi-v7a, x86, x86_64). The exact APK
+  size is **not claimed here** because v2 has NOT been built
+  in Actions yet (see Build). Expect tens of megabytes, not
+  kilobytes. ABI splits could shrink it later, at the cost of
+  per-ABI artifacts, and are NOT done in v2.
 
-## Animations in v1
+## Licenses in v2 — all open source, no proprietary component
 
-All animations live in `AnimHelper.java`, are under 350 ms
-except the download pulse, and add no permission or scope:
+- **GetGo itself: GPL-3.0.** See `LICENSE`.
+- **youtubedl-android 0.18.1** (`io.github.junkfood02.youtubedl-android:library`
+  and `:ffmpeg`, by yausername): **GPL-3.0**, as listed on
+  the upstream repository and on Maven Central. This is
+  compatible with GetGo's GPL-3.0; no licence conflict was
+  introduced by adding it.
+- **yt-dlp** (bundled inside youtubedl-android, lazy
+  extractors build): **Unlicense** (public-domain-like),
+  permissive and compatible with GPL-3.0 distribution.
+- **FFmpeg** (bundled via the `:ffmpeg` artifact, used for
+  merging video+audio and for `--extract-audio`): free
+  software under the LGPL/GPL family. GetGo adds no
+  proprietary codec, extractor, or binary of its own.
+- **Python 3.8 runtime** (bundled inside youtubedl-android):
+  **Python Software Foundation licence**, permissive.
+- **No component was added whose licence is unclear or
+  proprietary.** If a future component's licence is unclear,
+  it must be flagged and left out, not silently included.
 
-- **Download button, on press:** 110 ms shrink to 0.96, then
-  140 ms return to 1.0.
-- **Download button, while downloading:** a gentle pulse,
-  scale 1.0 → 1.04 on a 1000 ms cycle, cancelled the moment
-  the download ends, fails, or is cancelled.
-- **Progress:** animated progress-bar steps on Android 24+
-  (`setProgress(percent, true)`), plain steps below that.
-  The progress bar and Cancel button fade in on start and
-  fade out on finish, instead of appearing / vanishing.
-- **Screen transitions:** a soft fade in/out between Home and
-  Settings, both ways.
-- **State transitions:** lists fade in on refresh, the status
-  text fades in on completion, and the Liquid Glass toggle
-  change fades the About card.
-- **On completion:** a small bounce of the hero button
-  (1.0 → 1.12 → 1.0, 180 + 220 ms). No sound, no dialog, no
-  confetti — the bounce is the whole celebration.
-- **Implicit off-switch:** if Android's animator duration
-  scale is 0 (animations off / reduced motion), every helper
-  above becomes an instant change. Nothing loops, blocks, or
-  delays a tap or a download because of animation.
+## Polish in v2 (inside the locked scope)
 
-Honestly left out (not implemented, not hidden):
-
-- Lottie / JSON animations — would add a dependency and size.
-- A button that morphs into a progress ring — more complex
-  custom drawing for a v1 that must stay simple.
-- Shared-element transitions between screens — the fade
-  already gives a smooth feel without the fragility.
-- Haptics / vibration on completion — deliberately not added;
-  it is easy to add later if Taqi wants it, and it needs no
-  permission via `performHapticFeedback`, but it was not asked
-  for and v1 keeps feedback visual only.
-- One card-background decision (`Prefs.applyCard`) for every
-  screen, so light / dark and solid / glass always match:
-  solid cards when Liquid Glass is off, translucent frosted
-  cards when it is on, in both themes.
-- Regular font weights only, rounded cards, smooth Telegram-like
-  simplicity. No heavy bold type.
+Same as v1, unchanged: beautiful empty states for Recent
+and Library, light press feedback, and the AnimHelper
+animations (press shrink, download pulse, fades, completion
+bounce), all respecting Android's animator-duration-scale = 0
+(animations off = instant changes). See v1 README/BUILD for
+the full animation list; nothing was added that loops,
+blocks, or delays a tap or download.
 
 ## Liquid Glass — honest wording
 
@@ -119,28 +122,30 @@ Settings and under the home screen.
 
 - Gradle project (see `app/build.gradle`, `settings.gradle`).
   A GitHub Actions workflow (`.github/workflows/build-apk.yml`)
-  builds `assembleDebug`. That workflow has **not been run**,
-  because the repo is not published yet — it is included so the
-  published project can build on Actions.
-- The APK in this delivery was built with the manual
-  aapt2 / d8 pipeline from the same sources (Gradle on this VM
-  has a known daemon loopback failure, so it was not retried
-  in a loop). It is byte-verified (see BUILD.md), but it has
-  **not been run on a phone yet** — on-device testing of the
-  download flow is still needed.
+  builds `assembleDebug` and uploads it as artifact
+  `GetGo-debug`. Workflow name and artifact name are unchanged
+  from v1; the v1 failure is fixed in v2 (see BUILD.md).
+- **v2 has NOT been built yet.** Local Gradle on this VM
+  fails with the known daemon loopback error, and the manual
+  aapt2/d8 pipeline from v1 cannot build external AAR/Python
+  dependencies, so it was NOT used or pretended to work for
+  v2. The Actions build is the required proof step, and it
+  must be checked before anyone claims "YouTube works".
+- **On-device testing is still required** before any claim
+  that site downloads work on a phone: first-run engine
+  initialisation, a real site download, and dark/glass
+  appearance on a device are all untested in v2.
 
 ## Creative ideas proposed but NOT implemented
 
 These would change scope or add work, so they were left out
 on purpose and need Taqi's explicit say-so before being added:
 
-1. A yt-dlp-style site extractor (YouTube etc.) — large,
-   needs a Python / youtubedl-android runtime, breaks often.
-2. FFmpeg audio extraction for Audio Only — native library,
-   larger APK, more complexity.
-3. Share-sheet integration (receive links shared from other
+1. yt-dlp auto-update in-app (STABLE / NIGHTLY channel).
+2. Share-sheet integration (receive links shared from other
    apps) — new intent filter, small scope change.
-4. Resume for interrupted downloads (HTTP Range + partial files).
+3. Resume for interrupted downloads (HTTP Range + partial files).
+4. ABI splits to shrink the APK.
 5. An in-app media player, and Arabic UI localisation.
 
 ## License

@@ -12,9 +12,19 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # v2 fix for run 41700130593: android-actions/setup-android@v3
+      # failed here with sdkmanager "Failed to find package 'tools'"
+      # (exit 1) BEFORE the Gradle build. ubuntu-latest already
+      # ships an Android SDK (ANDROID_HOME / ANDROID_SDK_ROOT are
+      # pre-set on the runner), so that step is removed instead of
+      # being retried. The repo also has no gradlew wrapper script
+      # (only gradle-wrapper.properties), so the build uses the
+      # official Gradle setup action and the plain `gradle`
+      # command instead of ./gradlew. Job name, workflow name and
+      # artifact name are unchanged from v1.
+      - uses: gradle/actions/setup-gradle@v3
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
