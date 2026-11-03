@@ -65,8 +65,21 @@ import kotlin.jvm.functions.Function3;
  * no login for an account you do not own. Sites that need those
  * stay out of scope and will simply fail in the extractor.
  *
+ * v2.1 adds a runtime yt-dlp update, because the library's
+ * bundled yt-dlp (2025.11.12, library 0.18.1 — still the latest
+ * library release on Maven Central) is older than YouTube's
+ * SABR change and fails YouTube with HTTP 403. Before the
+ * first site download in a process, the app calls
+ * YoutubeDL.updateYoutubeDL(NIGHTLY) — nightly, because
+ * YouTube fixes ship there weeks before stable — and falls
+ * back to the bundled binary if the update fails, so a failed
+ * update never blocks a download attempt.
+ *
  * API surface used here is only what the upstream README and
- * sample app confirm: YoutubeDL.init, FFmpeg.init,
+ * sample app confirm, plus the update API verified against
+ * the 0.18.1 AAR with javap: YoutubeDL.init, FFmpeg.init,
+ * YoutubeDL.updateYoutubeDL(Context, UpdateChannel) returning
+ * UpdateStatus, YoutubeDL.version(Context),
  * YoutubeDL.getInfo (title, best-effort via reflection — see
  * downloadViaExtractor), YoutubeDLRequest + addOption,
  * YoutubeDL.execute(request, processId, Function3 callback),
@@ -81,6 +94,7 @@ public class MainActivity extends Activity {
     // to the one extractor download that can be running.
     private static final String EXTRACTOR_PROCESS_ID = "getgo-download";
     private static boolean engineReady = false;
+    private static boolean ytdlpUpdateAttempted = false;
 
     private EditText linkInput;
     private Spinner qualitySpinner;
@@ -484,6 +498,34 @@ public class MainActivity extends Activity {
                             + " " + e.getMessage());
                     finishProgressUi();
                     return;
+                }
+            }
+
+            // v2.1: update yt-dlp once per process, before the
+            // first site download. NIGHTLY, not STABLE, because
+            // YouTube/SABR fixes land there weeks earlier. A
+            // failed update is NOT fatal: the bundled binary
+            // stays in place and the download is still attempted,
+            // so the user sees the real download result, not an
+            // update error. This runs on the download thread,
+            // never on the UI thread.
+            if (!ytdlpUpdateAttempted) {
+                ytdlpUpdateAttempted = true;
+                try {
+                    setStatus(getString(R.string.status_updating_ytdlp));
+                    YoutubeDL.getInstance().updateYoutubeDL(this,
+                            YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE);
+                    String v = null;
+                    try {
+                        v = YoutubeDL.getInstance().version(this);
+                    } catch (Exception ignored) {
+                        // Version display is a nicety, not a gate.
+                    }
+                    setStatus(getString(R.string.status_ytdlp_updated)
+                            + " " + (v != null ? v.trim() : ""));
+                } catch (Exception e) {
+                    setStatus(getString(R.string.status_ytdlp_update_failed)
+                            + " " + (e.getMessage() != null ? e.getMessage() : ""));
                 }
             }
 
