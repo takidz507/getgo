@@ -135,6 +135,19 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // v2.3.1: ask for notification permission on the very
+        // first launch, once. Later launches never ask again.
+        if (Build.VERSION.SDK_INT >= 33 && !Prefs.isNotifAsked(this)) {
+            Prefs.setNotifAsked(this);
+            if (checkSelfPermission(
+                    android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                        1);
+            }
+        }
+
         linkInput = (EditText) findViewById(R.id.link_input);
         qualitySpinner = (Spinner) findViewById(R.id.quality_spinner);
         modeGroup = (RadioGroup) findViewById(R.id.mode_group);
@@ -471,18 +484,6 @@ public class MainActivity extends Activity {
         if (DownloadService.isRunning()) {
             setStatus(getString(R.string.status_busy));
             return;
-        }
-        // Completed (non-foreground) notifications need the runtime
-        // notification permission on Android 13+; the foreground
-        // progress notification shows even without it, so the
-        // download starts either way.
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(
-                        android.Manifest.permission.POST_NOTIFICATIONS)
-                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
-                    1);
         }
         final boolean audioOnly = isAudioOnly();
         final String quality = qualitySpinner.getSelectedItem() != null

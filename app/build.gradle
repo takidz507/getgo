@@ -10,8 +10,8 @@ android {
         applicationId 'com.taki.getgo'
         minSdk 26
         targetSdk 34
-        versionCode 5
-        versionName '2.3.0'
+        versionCode 6
+        versionName '2.3.1'
         // ABIs shipped by youtubedl-android (see its README/sample app).
         // All four are kept so the extractor works on any device;
         // ABI splits could shrink the APK later, at the cost of

@@ -12,6 +12,7 @@ public final class Prefs {
     private static final String FILE = "getgo_prefs";
     private static final String KEY_DARK = "dark_mode";
     private static final String KEY_GLASS = "liquid_glass";
+    private static final String KEY_NOTIF_ASKED = "notif_asked";
     private static final String KEY_UPDATE_AVAILABLE = "update_available";
     private static final String KEY_UPDATE_TAG = "update_tag";
     private static final String KEY_UPDATE_URL = "update_url";
@@ -43,6 +44,21 @@ public final class Prefs {
 
     public static void setGlass(Context ctx, boolean glass) {
         prefs(ctx).edit().putBoolean(KEY_GLASS, glass).apply();
+    }
+
+    /**
+     * v2.3.1: notification permission is asked ONCE, on the
+     * very first launch. If the user denies it, GetGo never
+     * nags again — the foreground progress notification still
+     * shows, only the finished notification may be hidden by
+     * the system.
+     */
+    public static boolean isNotifAsked(Context ctx) {
+        return prefs(ctx).getBoolean(KEY_NOTIF_ASKED, false);
+    }
+
+    public static void setNotifAsked(Context ctx) {
+        prefs(ctx).edit().putBoolean(KEY_NOTIF_ASKED, true).apply();
     }
 
     /**
