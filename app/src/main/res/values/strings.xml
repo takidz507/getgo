@@ -30,6 +30,10 @@
     <string name="delete_confirm_title">Delete this file?</string>
     <string name="delete_confirm_msg">It will be removed from your Library and deleted from the device.</string>
     <string name="delete_done">Deleted.</string>
+    <string name="notif_channel_downloads">Downloads</string>
+    <string name="notif_downloading">Downloading…</string>
+    <string name="share_no_link">No link found in what was shared.</string>
+    <string name="share_downloading">Downloading in the background — check your notifications.</string>
     <string name="delete_failed">Could not delete the file, but it was removed from the Library list.</string>
     <string name="settings_title">Settings</string>
     <string name="dark_mode">Dark mode</string>
@@ -37,7 +41,7 @@
     <string name="liquid_glass_note">Off by default. When on, cards turn into layered translucent glass with a soft highlight. This is an Android lookalike, not Apple Liquid Glass.</string>
     <string name="about_title">About</string>
     <string name="github_line">GitHub: takidz507 — github.com/takidz507/getgo</string>
-    <string name="version_label">GetGo v2.2.0 — site downloads via yt-dlp, updated nightly</string>
+    <string name="version_label">GetGo v2.3.0 — site downloads via yt-dlp, updated nightly</string>
     <string name="status_preparing_engine">Preparing yt-dlp engine…</string>
     <string name="status_updating_ytdlp">Updating yt-dlp to the latest nightly version…</string>
     <string name="status_ytdlp_updated">yt-dlp updated:</string>

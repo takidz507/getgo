@@ -100,9 +100,9 @@ import kotlin.jvm.functions.Function3;
 public class MainActivity extends Activity {
     // One process ID for the whole app, so Cancel always refers
     // to the one extractor download that can be running.
-    private static final String EXTRACTOR_PROCESS_ID = "getgo-download";
-    private static boolean engineReady = false;
-    private static boolean ytdlpUpdateAttempted = false;
+    // v2.3: the extractor process, engine state and download
+    // thread live in DownloadEngine / DownloadService now, so a
+    // download survives this Activity. Nothing here owns them.
 
     private EditText linkInput;
     private Spinner qualitySpinner;
@@ -121,8 +121,6 @@ public class MainActivity extends Activity {
 
     private boolean appliedDark;
     private boolean appliedGlass;
-    private volatile boolean cancelled;
-    private Thread downloadThread;
     private android.animation.ObjectAnimator pulseAnimator;
 
     @Override
@@ -195,19 +193,9 @@ public class MainActivity extends Activity {
         cancelButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                cancelled = true;
-                if (downloadThread != null) {
-                    downloadThread.interrupt();
-                }
-                // For an extractor download, interrupting our thread
-                // is NOT enough: the yt-dlp process must be stopped
-                // by its own ID. Failure here is harmless (no such
-                // process, or the engine was never started).
-                try {
-                    YoutubeDL.getInstance().destroyProcessById(EXTRACTOR_PROCESS_ID);
-                } catch (Exception ignored) {
-                }
+                DownloadService.cancelDownload(MainActivity.this);
                 setStatus(getString(R.string.status_cancelled));
+                finishProgressUi();
             }
         });
 
@@ -339,6 +327,29 @@ public class MainActivity extends Activity {
         }
         refreshLists();
         refreshUpdateDot();
+        // Android 13+ wants an explicit export flag for dynamic
+        // receivers; older devices do not have that overload, so
+        // the flag branch only runs where it exists.
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(progressReceiver,
+                    new android.content.IntentFilter(
+                            DownloadService.ACTION_PROGRESS),
+                    android.content.Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(progressReceiver,
+                    new android.content.IntentFilter(
+                            DownloadService.ACTION_PROGRESS));
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        try {
+            unregisterReceiver(progressReceiver);
+        } catch (Exception ignored) {
+            // Receiver was never registered (e.g. early pause).
+        }
     }
 
     private void applyCards() {
@@ -457,64 +468,78 @@ public class MainActivity extends Activity {
             setStatus(getString(R.string.status_no_torrent));
             return;
         }
-        if (downloadThread != null && downloadThread.isAlive()) {
+        if (DownloadService.isRunning()) {
             setStatus(getString(R.string.status_busy));
             return;
+        }
+        // Completed (non-foreground) notifications need the runtime
+        // notification permission on Android 13+; the foreground
+        // progress notification shows even without it, so the
+        // download starts either way.
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(
+                        android.Manifest.permission.POST_NOTIFICATIONS)
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                    1);
         }
         final boolean audioOnly = isAudioOnly();
         final String quality = qualitySpinner.getSelectedItem() != null
                 ? qualitySpinner.getSelectedItem().toString() : "Best";
-        cancelled = false;
         progressBar.setVisibility(View.VISIBLE);
         cancelButton.setVisibility(View.VISIBLE);
         AnimHelper.fadeIn(progressBar);
         AnimHelper.fadeIn(cancelButton);
         pulseAnimator = AnimHelper.startPulse(downloadButton);
         setProgress(0, getString(R.string.status_connecting));
-
-        // Generic routing, no site allowlist: a direct file goes
-        // down the fast v1 path; everything else is handed to
-        // yt-dlp, which either recognises it or fails honestly.
-        final boolean direct = isDirectFileLink(rawLink);
-        downloadThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                if (direct) {
-                    downloadDirect(rawLink, audioOnly, quality);
-                } else {
-                    downloadViaExtractor(rawLink, audioOnly, quality);
-                }
-            }
-        });
-        downloadThread.start();
+        // v2.3: the service owns the download, so leaving the app
+        // (or the phone sleeping the UI) does not stop it. The
+        // notification carries the live percentage.
+        DownloadService.startDownload(this, rawLink, audioOnly, quality);
     }
+
+    /** Progress broadcasts from DownloadService, while this screen is open. */
+    private android.content.BroadcastReceiver progressReceiver =
+            new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context context,
+                                      Intent intent) {
+                    if (intent == null) {
+                        return;
+                    }
+                    int pct = intent.getIntExtra(
+                            DownloadService.EXTRA_PERCENT, -1);
+                    String text = intent.getStringExtra(
+                            DownloadService.EXTRA_TEXT);
+                    String status = intent.getStringExtra(
+                            DownloadService.EXTRA_STATUS);
+                    String saved = intent.getStringExtra(
+                            DownloadService.EXTRA_SAVED_FILE);
+                    boolean finished = intent.getBooleanExtra(
+                            DownloadService.EXTRA_FINISHED, false);
+                    if (status != null && !status.isEmpty()) {
+                        setStatus(status);
+                    }
+                    if (pct >= 0) {
+                        setProgress(pct, text != null ? text : "");
+                    }
+                    if (saved != null && !saved.isEmpty()) {
+                        AnimHelper.completionBounce(downloadButton);
+                        refreshLists();
+                    }
+                    if (finished) {
+                        finishProgressUi();
+                    }
+                }
+            };
+
 
     /**
      * Direct-file detection, used ONLY to pick the fast path.
      * It is not a site allowlist: a link that is not a direct
      * file is not refused, it is sent to the extractor.
      */
-    private boolean isDirectFileLink(String rawLink) {
-        String path = rawLink;
-        int q = path.indexOf('?');
-        if (q >= 0) {
-            path = path.substring(0, q);
-        }
-        int h = path.indexOf('#');
-        if (h >= 0) {
-            path = path.substring(0, h);
-        }
-        String lower = path.toLowerCase();
-        String[] exts = {".mp4", ".mp3", ".m4a", ".mkv", ".webm",
-                ".mov", ".avi", ".flac", ".opus", ".wav",
-                ".pdf", ".zip", ".txt", ".epub"};
-        for (int i = 0; i < exts.length; i++) {
-            if (lower.endsWith(exts[i])) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /**
      * Real yt-dlp format selector for the spinner choice. A capped
@@ -524,35 +549,6 @@ public class MainActivity extends Activity {
      * a higher quality than the user chose. "Best" is the only
      * uncapped choice.
      */
-    private String formatSelector(String quality) {
-        if (quality == null) {
-            return "bestvideo+bestaudio/best";
-        }
-        if (quality.startsWith("1080")) {
-            return "bestvideo[height<=1080]+bestaudio/best[height<=1080]";
-        }
-        if (quality.startsWith("720")) {
-            return "bestvideo[height<=720]+bestaudio/best[height<=720]";
-        }
-        if (quality.startsWith("480")) {
-            return "bestvideo[height<=480]+bestaudio/best[height<=480]";
-        }
-        if (quality.startsWith("360")) {
-            return "bestvideo[height<=360]+bestaudio/best[height<=360]";
-        }
-        return "bestvideo+bestaudio/best";
-    }
-
-    private String audioQualityValue(String quality) {
-        if (quality != null && quality.startsWith("128")) {
-            return "128K";
-        }
-        if (quality != null && quality.startsWith("96")) {
-            return "96K";
-        }
-        // "Best audio": yt-dlp's 0 = best VBR quality.
-        return "0";
-    }
 
     /**
      * Site download via youtubedl-android (yt-dlp + FFmpeg).
@@ -568,358 +564,12 @@ public class MainActivity extends Activity {
      * public Downloads folder. Moving via MediaStore afterwards
      * keeps v1's library location (Download/GetGo) unchanged.
      */
-    private void downloadViaExtractor(final String rawLink,
-            final boolean audioOnly, final String quality) {
-        try {
-            if (!engineReady) {
-                setStatus(getString(R.string.status_preparing_engine));
-                try {
-                    YoutubeDL.getInstance().init(this);
-                    FFmpeg.getInstance().init(this);
-                    engineReady = true;
-                } catch (Exception e) {
-                    setStatus(getString(R.string.status_engine_failed)
-                            + " " + e.getMessage());
-                    finishProgressUi();
-                    return;
-                }
-            }
-
-            // v2.1: update yt-dlp once per process, before the
-            // first site download. NIGHTLY, not STABLE, because
-            // YouTube/SABR fixes land there weeks earlier. A
-            // failed update is NOT fatal: the bundled binary
-            // stays in place and the download is still attempted,
-            // so the user sees the real download result, not an
-            // update error. This runs on the download thread,
-            // never on the UI thread.
-            if (!ytdlpUpdateAttempted) {
-                ytdlpUpdateAttempted = true;
-                try {
-                    setStatus(getString(R.string.status_updating_ytdlp));
-                    YoutubeDL.getInstance().updateYoutubeDL(this,
-                            YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE);
-                    String v = null;
-                    try {
-                        v = YoutubeDL.getInstance().version(this);
-                    } catch (Exception ignored) {
-                        // Version display is a nicety, not a gate.
-                    }
-                    setStatus(getString(R.string.status_ytdlp_updated)
-                            + " " + (v != null ? v.trim() : ""));
-                } catch (Exception e) {
-                    setStatus(getString(R.string.status_ytdlp_update_failed)
-                            + " " + (e.getMessage() != null ? e.getMessage() : ""));
-                }
-            }
-
-            // Title preview, best-effort via reflection (see class
-            // header: only getTitle() is used, nothing else from
-            // VideoInfo is compile-time pinned). A preview failure
-            // does NOT abort: the execute step is the real test,
-            // and its failure is what the user is shown.
-            try {
-                Object info = YoutubeDL.getInstance().getInfo(rawLink);
-                if (info != null) {
-                    Method getTitle = info.getClass().getMethod("getTitle");
-                    Object title = getTitle.invoke(info);
-                    if (title != null && !title.toString().trim().isEmpty()) {
-                        setStatus(getString(R.string.status_found)
-                                + " " + title.toString().trim());
-                    }
-                }
-            } catch (Exception ignored) {
-                // Preview is a nicety, not a gate.
-            }
-            if (cancelled) {
-                setStatus(getString(R.string.status_cancelled));
-                finishProgressUi();
-                return;
-            }
-
-            File tempDir = new File(getExternalFilesDir(null), "getgo-yt");
-            if (!tempDir.exists() && !tempDir.mkdirs() && !tempDir.exists()) {
-                setStatus(getString(R.string.status_failed) + " temp dir");
-                finishProgressUi();
-                return;
-            }
-            // Clear stale temp files from a previous run, so the
-            // "newest file" scan below cannot pick up an old one.
-            File[] stale = tempDir.listFiles();
-            if (stale != null) {
-                for (int i = 0; i < stale.length; i++) {
-                    stale[i].delete();
-                }
-            }
-
-            YoutubeDLRequest request = new YoutubeDLRequest(rawLink);
-            request.addOption("--no-playlist");
-            request.addOption("--no-mtime");
-            request.addOption("--restrict-filenames");
-            request.addOption("-o", tempDir.getAbsolutePath() + "/%(title)s.%(ext)s");
-            if (audioOnly) {
-                request.addOption("-f", "bestaudio");
-                request.addOption("--extract-audio");
-                request.addOption("--audio-format", "mp3");
-                request.addOption("--audio-quality", audioQualityValue(quality));
-            } else {
-                request.addOption("-f", formatSelector(quality));
-                request.addOption("--merge-output-format", "mp4");
-            }
-
-            final Function3<Float, Long, String, Unit> callback =
-                    new Function3<Float, Long, String, Unit>() {
-                        @Override
-                        public Unit invoke(Float progress, Long eta, String line) {
-                            if (progress != null && progress.floatValue() >= 0) {
-                                int pct = (int) progress.floatValue();
-                                if (pct > 100) {
-                                    pct = 100;
-                                }
-                                String text = line != null && !line.isEmpty()
-                                        ? line : pct + "%";
-                                setProgress(pct, text);
-                            }
-                            return Unit.INSTANCE;
-                        }
-                    };
-            YoutubeDL.getInstance().execute(request, EXTRACTOR_PROCESS_ID, callback);
-
-            if (cancelled) {
-                setStatus(getString(R.string.status_cancelled));
-                finishProgressUi();
-                return;
-            }
-            File[] produced = tempDir.listFiles();
-            File best = null;
-            if (produced != null) {
-                for (int i = 0; i < produced.length; i++) {
-                    if (produced[i].isFile() && produced[i].length() > 0
-                            && (best == null
-                            || produced[i].lastModified() > best.lastModified())) {
-                        best = produced[i];
-                    }
-                }
-            }
-            if (best == null) {
-                setStatus(getString(R.string.status_no_file));
-                finishProgressUi();
-                return;
-            }
-            moveTempFileToLibrary(best, quality);
-        } catch (YoutubeDLException e) {
-            // yt-dlp's own failure: unsupported site, login-only
-            // content, DRM, or a site that changed. Say so plainly
-            // instead of blaming the network or the user.
-            setStatus(getString(R.string.status_site_failed)
-                    + " " + (e.getMessage() != null ? e.getMessage() : ""));
-        } catch (Exception e) {
-            setStatus(getString(R.string.status_failed)
-                    + " " + (e.getMessage() != null ? e.getMessage() : ""));
-        } finally {
-            finishProgressUi();
-        }
-    }
 
     /**
      * Move a finished extractor file into Download/GetGo via
      * MediaStore (same destination and index format as v1), then
      * delete the temp copy. Returns via UI status, like v1.
      */
-    private void moveTempFileToLibrary(File tempFile, String quality) {
-        OutputStream out = null;
-        Uri savedUri = null;
-        try {
-            String fileName = tempFile.getName();
-            if (Build.VERSION.SDK_INT >= 29) {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-                values.put(MediaStore.Downloads.MIME_TYPE,
-                        "application/octet-stream");
-                values.put(MediaStore.Downloads.RELATIVE_PATH, "Download/GetGo");
-                savedUri = getContentResolver().insert(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (savedUri == null) {
-                    throw new Exception("MediaStore insert returned null");
-                }
-                out = getContentResolver().openOutputStream(savedUri);
-            } else {
-                File dir = new File(
-                        getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "GetGo");
-                if (!dir.exists()) {
-                    dir.mkdirs();
-                }
-                File file = new File(dir, fileName);
-                savedUri = Uri.fromFile(file);
-                out = new FileOutputStream(file);
-            }
-            if (out == null) {
-                throw new Exception("Could not open output stream");
-            }
-            FileInputStream in = new FileInputStream(tempFile);
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-            in.close();
-            out.close();
-            out = null;
-            long size = tempFile.length();
-            tempFile.delete();
-            DownloadIndex.append(this, new DownloadIndex.Entry(
-                    fileName, size, savedUri.toString(), System.currentTimeMillis()));
-            setProgress(100, DownloadIndex.formatSize(size));
-            setStatus(getString(R.string.status_done) + " " + fileName
-                    + " (" + quality + ")");
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    AnimHelper.completionBounce(downloadButton);
-                    AnimHelper.fadeIn(statusText);
-                    refreshLists();
-                }
-            });
-        } catch (Exception e) {
-            setStatus(getString(R.string.status_failed)
-                    + " " + (e.getMessage() != null ? e.getMessage() : ""));
-        } finally {
-            try {
-                if (out != null) {
-                    out.close();
-                }
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private void downloadDirect(String rawLink, boolean audioOnly, String quality) {
-        HttpURLConnection conn = null;
-        OutputStream out = null;
-        Uri savedUri = null;
-        String fileName = null;
-        try {
-            URL url = new URL(rawLink);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestProperty("User-Agent", "GetGo/1.0");
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(30000);
-            conn.setInstanceFollowRedirects(true);
-            conn.connect();
-            int code = conn.getResponseCode();
-            if (code < 200 || code >= 300) {
-                setStatus(getString(R.string.status_http_error) + " " + code);
-                finishProgressUi();
-                return;
-            }
-            String contentType = conn.getContentType();
-            if (contentType != null && contentType.startsWith("text/html")) {
-                // A web page is not a file. Refuse honestly instead
-                // of saving HTML and calling it a video.
-                setStatus(getString(R.string.status_no_site_extraction));
-                finishProgressUi();
-                return;
-            }
-            fileName = fileNameFrom(conn, rawLink);
-            long total = conn.getContentLengthLong();
-            boolean isVideoFile = fileName.toLowerCase().endsWith(".mp4")
-                    || fileName.toLowerCase().endsWith(".mkv")
-                    || fileName.toLowerCase().endsWith(".webm");
-            if (audioOnly && isVideoFile) {
-                setStatus(getString(R.string.status_audio_note));
-            }
-
-            if (Build.VERSION.SDK_INT >= 29) {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-                values.put(MediaStore.Downloads.MIME_TYPE,
-                        contentType != null ? contentType.split(";")[0] : "application/octet-stream");
-                values.put(MediaStore.Downloads.RELATIVE_PATH, "Download/GetGo");
-                savedUri = getContentResolver().insert(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (savedUri == null) {
-                    throw new Exception("MediaStore insert returned null");
-                }
-                out = getContentResolver().openOutputStream(savedUri);
-            } else {
-                File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "GetGo");
-                if (!dir.exists()) {
-                    dir.mkdirs();
-                }
-                File file = new File(dir, fileName);
-                savedUri = Uri.fromFile(file);
-                out = new FileOutputStream(file);
-            }
-            if (out == null) {
-                throw new Exception("Could not open output stream");
-            }
-            InputStream in = conn.getInputStream();
-            byte[] buffer = new byte[8192];
-            long downloaded = 0;
-            int read;
-            long lastUi = 0;
-            while ((read = in.read(buffer)) != -1) {
-                if (cancelled || Thread.currentThread().isInterrupted()) {
-                    setStatus(getString(R.string.status_cancelled));
-                    finishProgressUi();
-                    try {
-                        out.close();
-                    } catch (Exception ignored) {
-                    }
-                    return;
-                }
-                out.write(buffer, 0, read);
-                downloaded += read;
-                long now = System.currentTimeMillis();
-                if (now - lastUi > 200) {
-                    lastUi = now;
-                    if (total > 0) {
-                        int pct = (int) (downloaded * 100 / total);
-                        setProgress(pct, DownloadIndex.formatSize(downloaded)
-                                + " / " + DownloadIndex.formatSize(total));
-                    } else {
-                        setProgress(0, DownloadIndex.formatSize(downloaded));
-                    }
-                }
-            }
-            out.close();
-            out = null;
-            DownloadIndex.append(this, new DownloadIndex.Entry(
-                    fileName, downloaded, savedUri.toString(), System.currentTimeMillis()));
-            setProgress(100, DownloadIndex.formatSize(downloaded));
-            String done = getString(R.string.status_done) + " " + fileName;
-            if (audioOnly && isVideoFile) {
-                done += " — " + getString(R.string.status_audio_note);
-            }
-            // Quality is a real choice for future site streams; for a
-            // direct file the file is saved as-is, and v1 says so.
-            done += " (" + quality + ")";
-            setStatus(done);
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    // Gentle completion moment: bounce the hero button
-                    // and fade the fresh lists in. No sound, no dialog.
-                    AnimHelper.completionBounce(downloadButton);
-                    AnimHelper.fadeIn(statusText);
-                    refreshLists();
-                }
-            });
-        } catch (Exception e) {
-            setStatus(getString(R.string.status_failed) + " " + e.getMessage());
-        } finally {
-            try {
-                if (out != null) {
-                    out.close();
-                }
-            } catch (Exception ignored) {
-            }
-            if (conn != null) {
-                conn.disconnect();
-            }
-            finishProgressUi();
-        }
-    }
 
     private void finishProgressUi() {
         runOnUiThread(new Runnable() {
@@ -933,41 +583,4 @@ public class MainActivity extends Activity {
         });
     }
 
-    private String fileNameFrom(HttpURLConnection conn, String rawLink) {
-        String disposition = conn.getHeaderField("Content-Disposition");
-        if (disposition != null && disposition.contains("filename=")) {
-            String name = disposition.substring(disposition.indexOf("filename=") + 9);
-            name = name.replace("\"", "").trim();
-            if (!name.isEmpty()) {
-                return sanitize(name);
-            }
-        }
-        try {
-            String path = new URL(rawLink).getPath();
-            int slash = path.lastIndexOf('/');
-            if (slash >= 0 && slash + 1 < path.length()) {
-                String name = path.substring(slash + 1);
-                int q = name.indexOf('?');
-                if (q >= 0) {
-                    name = name.substring(0, q);
-                }
-                if (!name.isEmpty()) {
-                    return sanitize(name);
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return "getgo_download_" + System.currentTimeMillis();
-    }
-
-    private String sanitize(String name) {
-        String clean = name.replaceAll("[^A-Za-z0-9._\\-]", "_");
-        if (clean.length() > 100) {
-            clean = clean.substring(0, 100);
-        }
-        if (clean.isEmpty() || clean.equals(".") || clean.equals("..")) {
-            clean = "getgo_download_" + System.currentTimeMillis();
-        }
-        return clean;
-    }
 }
