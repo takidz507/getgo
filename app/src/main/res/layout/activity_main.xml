@@ -1,21 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/scroll_view"
+<!-- v2.3.2: the nav bar is OUTSIDE the ScrollView, pinned
+     at the bottom of the screen. That is the theme-proof fix
+     for the dark-mode cut-off buttons: no matter how tall the
+     scrollable content is, or which theme is active, the nav
+     can never be pushed below the fold or under a system bar.
+     fitsSystemWindows on this root keeps everything out from
+     under the status and navigation bars. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:scrollbars="none"
-    android:fitsSystemWindows="true"
-    android:padding="16dp">
+    android:orientation="vertical"
+    android:fitsSystemWindows="true">
 
-    <!-- v2.3.1: match_parent + the weighted spacer below make
-         the screen fill the full height (nav pinned at the
-         bottom) when content fits, and still scroll when it
-         does not. fitsSystemWindows keeps content out from
-         under the status and navigation bars. -->
+    <ScrollView
+        android:id="@+id/scroll_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:padding="16dp">
+
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="vertical">
 
         <LinearLayout
@@ -204,35 +212,34 @@
             android:textSize="12sp"
             android:gravity="center" />
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingTop="20dp"
-            android:paddingBottom="8dp">
-            <Button
-                android:id="@+id/nav_downloads"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:background="@drawable/pill_button"
-                android:textColor="#FFFFFF"
-                android:text="@string/nav_downloads"
-                android:textAllCaps="false" />
-            <Button
-                android:id="@+id/nav_settings"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:background="@drawable/pill_button"
-                android:textColor="#FFFFFF"
-                android:text="@string/nav_settings"
-                android:textAllCaps="false" />
-        </LinearLayout>
     </LinearLayout>
-</ScrollView>
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="16dp">
+        <Button
+            android:id="@+id/nav_downloads"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/pill_button"
+            android:textColor="#FFFFFF"
+            android:text="@string/nav_downloads"
+            android:textAllCaps="false" />
+        <Button
+            android:id="@+id/nav_settings"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/pill_button"
+            android:textColor="#FFFFFF"
+            android:text="@string/nav_settings"
+            android:textAllCaps="false" />
+    </LinearLayout>
+</LinearLayout>

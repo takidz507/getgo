@@ -41,7 +41,7 @@
     <string name="liquid_glass_note">Off by default. When on, cards turn into layered translucent glass with a soft highlight. This is an Android lookalike, not Apple Liquid Glass.</string>
     <string name="about_title">About</string>
     <string name="github_line">GitHub: takidz507 — github.com/takidz507/getgo</string>
-    <string name="version_label">GetGo v2.3.1 — site downloads via yt-dlp, updated nightly</string>
+    <string name="version_label">GetGo v2.3.2 — site downloads via yt-dlp, updated nightly</string>
     <string name="status_preparing_engine">Preparing yt-dlp engine…</string>
     <string name="status_updating_ytdlp">Updating yt-dlp to the latest nightly version…</string>
     <string name="status_ytdlp_updated">yt-dlp updated:</string>
