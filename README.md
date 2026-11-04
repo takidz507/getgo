@@ -1,9 +1,28 @@
 # GetGo
 
 A simple, easy, fun, open-source Android downloader.
+Paste a link, tap one big button, done. No account, no ads, no tracking.
 By Taki — GitHub: takidz507 — https://github.com/takidz507/getgo
 
-## What GetGo v2 does
+## Download (latest: v2.4.0)
+
+Get the APK from [Releases](https://github.com/takidz507/getgo/releases/latest).
+Five files, same version, same code — pick yours:
+- **Universal** (194 MB) — if you don't know your phone's chip, take this one.
+- **arm64-v8a** (55 MB) — modern phones, including OnePlus Ace 3.
+- armeabi-v7a (48 MB), x86 (53 MB), x86_64 (58 MB) — older phones / emulators.
+
+In the app, ⋮ → update check shows a dot when a new version is out.
+
+![GetGo home screen (dark mode)](screenshots/home-dark.jpg)
+
+## Proven on a real phone
+
+Downloaded successfully on-device: TikTok, YouTube, Facebook,
+public Instagram posts, and real Pinterest videos. Login-gated /
+private Instagram content is expected to fail by design (see below).
+
+## What GetGo does (v2.4.0)
 
 - **Design 1 — One-Tap Hero, unchanged:** paste a link on top,
   one large central Download button, recent downloads as chips
@@ -55,23 +74,31 @@ By Taki — GitHub: takidz507 — https://github.com/takidz507/getgo
   Out of scope.
 - **No in-app player, no flashcards, no MCP, no 158 tools.**
   Those belong to desktop OmniGet, not to this simple app.
-- **No resume:** Cancel stops a download; resume of a partial
-  download is not in v2.
+- **Pause / Resume (v2.4.0):** pause in the app or in the
+  notification, resume later — even after leaving the app.
+  Site downloads use yt-dlp `--continue`; direct files use
+  HTTP Range. One paused download at a time.
+- **Background downloads (v2.3.0):** downloads continue in a
+  foreground service with a live % notification and Cancel;
+  share a link to GetGo to start a download without opening
+  the main screen.
+- **yt-dlp nightly auto-update (v2.1.0):** once per app
+  process, before the first site download, GetGo tries the
+  latest nightly yt-dlp and falls back to the bundled one if
+  the update fails.
 - **Site extractors break when sites change.** yt-dlp's
   extractors are maintained upstream; a site that worked
-  yesterday can fail tomorrow until yt-dlp is updated. GetGo
-  v2 does NOT auto-update yt-dlp in-app (that is a future
-  option, not a hidden behaviour).
+  yesterday can fail tomorrow until yt-dlp is updated — which
+  is why the nightly update above exists.
 
-## Size — v2 will be much larger than v1, honestly
+## Size — honestly
 
 - v1 was 38,028 bytes because it had zero dependencies.
-- v2 bundles a Python runtime + yt-dlp + FFmpeg for all four
-  ABIs (arm64-v8a, armeabi-v7a, x86, x86_64). The exact APK
-  size is **not claimed here** because v2 has NOT been built
-  in Actions yet (see Build). Expect tens of megabytes, not
-  kilobytes. ABI splits could shrink it later, at the cost of
-  per-ABI artifacts, and are NOT done in v2.
+- v2.4.0 bundles a Python runtime + yt-dlp + FFmpeg. The
+  arm64-v8a APK is 55 MB (universal: 194 MB) — most of it is
+  FFmpeg (~35 MB) and Python (~14 MB), not the app's own code
+  or design (under 1 MB). Per-ABI builds (v2.3.4) already
+  shrank the download from 194 MB to 55 MB for modern phones.
 
 ## Licenses in v2 — all open source, no proprietary component
 
@@ -122,31 +149,25 @@ Settings and under the home screen.
 
 - Gradle project (see `app/build.gradle`, `settings.gradle`).
   A GitHub Actions workflow (`.github/workflows/build-apk.yml`)
-  builds `assembleDebug` and uploads it as artifact
-  `GetGo-debug`. Workflow name and artifact name are unchanged
-  from v1; the v1 failure is fixed in v2 (see BUILD.md).
-- **v2 has NOT been built yet.** Local Gradle on this VM
-  fails with the known daemon loopback error, and the manual
-  aapt2/d8 pipeline from v1 cannot build external AAR/Python
-  dependencies, so it was NOT used or pretended to work for
-  v2. The Actions build is the required proof step, and it
-  must be checked before anyone claims "YouTube works".
-- **On-device testing is still required** before any claim
-  that site downloads work on a phone: first-run engine
-  initialisation, a real site download, and dark/glass
-  appearance on a device are all untested in v2.
+  builds `assembleDebug` for all five variants (universal + 4
+  per-ABI) and uploads them as artifact `GetGo-debug`.
+- v2.4.0 is built, byte-verified (aapt + apksigner) and
+  released: https://github.com/takidz507/getgo/releases/tag/v2.4.0
+- **Still untested on-device:** pause/resume itself (v2.4.0),
+  and long background downloads under battery optimisation.
 
-## Creative ideas proposed but NOT implemented
+## Ideas proposed but NOT implemented
 
-These would change scope or add work, so they were left out
-on purpose and need Taqi's explicit say-so before being added:
+These were left out on purpose and need Taqi's explicit
+say-so before being added:
 
-1. yt-dlp auto-update in-app (STABLE / NIGHTLY channel).
-2. Share-sheet integration (receive links shared from other
-   apps) — new intent filter, small scope change.
-3. Resume for interrupted downloads (HTTP Range + partial files).
-4. ABI splits to shrink the APK.
-5. An in-app media player, and Arabic UI localisation.
+1. An in-app media player, and Arabic UI localisation.
+2. Playlists / download queue — parked by Taqi as
+   "ربما فيما بعد" (2026-11-04); see `NOTES.md`.
+3. Instagram login / cookies — explicitly declined by Taqi
+   ("لا تفعلها", 2026-11-03); do not build unless he asks again.
+4. F-Droid submission — parked by Taqi ("خلي فيما بعد",
+   2026-11-04).
 
 ## License
 
